@@ -759,7 +759,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
     logger.info(f"کاربر {user_id} لینک معتبر در inline فرستاد: {query}")
 
-async def main():
+def main():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
@@ -782,18 +782,14 @@ async def main():
     def health_check():
         return "OK", 200
 
-    # اجرای Application به صورت غیرهمزمان
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-
     # اجرای Flask در یک نخ جداگانه
     from threading import Thread
     flask_thread = Thread(target=lambda: app_flask.run(host='0.0.0.0', port=8080), daemon=True)
     flask_thread.start()
 
-    # منتظر ماندن تا ربات متوقف شود
-    await application.updater.idle()
+    # اجرای Application به صورت هم‌زمان
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("ربات شروع شد")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
