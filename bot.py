@@ -92,6 +92,7 @@ def check_ffmpeg():
 @contextmanager
 def temp_directory(user_id):
     temp_dir = tempfile.mkdtemp(prefix=f"user_{user_id}_")
+    logger.info(f"پوشه موقت برای کاربر {user_id} ساخته شد: {temp_dir}")
     try:
         yield temp_dir
     finally:
@@ -255,7 +256,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.message.reply_text(LANGUAGES[lang]["join_channels"])
     except Exception as e:
-        logger.error(f"خطا در بررسی عضویت: {str(e)}")
+        logger.error(f"خطا در بررسی عضویت برای کاربر {user_id}: {str(e)}")
         await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,11 +277,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["cancel"] = False
-    processing_msg = await update.message.reply_text(
-        LANGUAGES[lang]["in_queue"],
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f"cancel_{url}")]])
-    )
-    await request_queue.put((update, context, url, processing_msg))
+    with temp_directory(user_id) as temp_dir:  # فقط اینجا دایرکتوری موقت رو اضافه می‌کنیم
+        processing_msg = await update.message.reply_text(
+            LANGUAGES[lang]["in_queue"],
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f"cancel_{url}")]])
+        )
+        await request_queue.put((update, context, url, processing_msg))
 
 async def process_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE, url, processing_msg):
     lang = context.user_data.get("language", "fa")
@@ -375,9 +377,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     url = data[1]
-    processing_msg = await query.message.reply_text(LANGUAGES[lang]["processing"])
+    with temp_directory(user_id) as temp_dir:  # فقط اینجا دایرکتوری موقت رو اضافه می‌کنیم
+        processing_msg = await query.message.reply_text(LANGUAGES[lang]["processing"])
 
-    with temp_directory(user_id) as temp_dir:
         try:
             if not check_ffmpeg():
                 await processing_msg.edit_text(LANGUAGES[lang]["error"].format("FFmpeg نصب نشده است."))
