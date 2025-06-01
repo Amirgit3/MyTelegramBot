@@ -852,8 +852,12 @@ async def run_bot(application):
     logger.info("Application initialized")
     await application.start()
     logger.info("Application started")
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
     logger.info("Polling started")
+
+    # نگه داشتن برنامه در حال اجرا
+    while True:
+        await asyncio.sleep(3600)  # خوابیدن به مدت 1 ساعت برای جلوگیری از خروج
 
 async def shutdown(application, runner):
     logger.info("در حال متوقف کردن ربات...")
@@ -863,7 +867,7 @@ async def shutdown(application, runner):
     await runner.cleanup()
     logger.info("ربات متوقف شد")
 
-async def main():
+async def setup_and_run():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
@@ -883,21 +887,23 @@ async def main():
     await site.start()
     logger.info("سرور aiohttp برای health check روی پورت 8080 شروع شد")
 
-    try:
-        await run_bot(application)
-    except KeyboardInterrupt:
-        await shutdown(application, runner)
-    except Exception as e:
-        logger.error(f"خطای غیرمنتظره در ربات: {str(e)}")
-        await shutdown(application, runner)
-    finally:
-        await asyncio.sleep(5)  # تاخیر برای تمیز کردن
+    # اجرای ربات
+    await run_bot(application)
+
+    return application, runner
 
 if __name__ == "__main__":
-    # اجرای main در حلقه رویداد
     loop = asyncio.get_event_loop()
+    application, runner = loop.run_until_complete(setup_and_run())
+
     try:
-        loop.run_until_complete(main())
+        loop.run_forever()
     except KeyboardInterrupt:
+        loop.run_until_complete(shutdown(application, runner))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    except Exception as e:
+        logger.error(f"خطای غیرمنتظره: {str(e)}")
+        loop.run_until_complete(shutdown(application, runner))
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
