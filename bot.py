@@ -376,9 +376,34 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     lang = context.user_data.get("language", "fa")
 
+    logger.info(f"شروع بررسی عضویت برای کاربر {user_id}")
+
     try:
+        # بررسی اینکه ربات ادمین کانال‌ها هست یا نه
+        bot_id = (await context.bot.get_me()).id
+        logger.info(f"آیدی ربات: {bot_id}")
+
+        bot_member1 = await context.bot.get_chat_member(CHANNEL_1, bot_id)
+        bot_member2 = await context.bot.get_chat_member(CHANNEL_2, bot_id)
+
+        if bot_member1.status not in ["administrator", "creator"]:
+            logger.error(f"ربات در کانال {CHANNEL_1} ادمین نیست. وضعیت: {bot_member1.status}")
+            await query.message.reply_text("ربات باید در کانال ۱ ادمین باشد. لطفاً ادمین کنید و دوباره امتحان کنید.")
+            return
+
+        if bot_member2.status not in ["administrator", "creator"]:
+            logger.error(f"ربات در کانال {CHANNEL_2} ادمین نیست. وضعیت: {bot_member2.status}")
+            await query.message.reply_text("ربات باید در کانال ۲ ادمین باشد. لطفاً ادمین کنید و دوباره امتحان کنید.")
+            return
+
+        logger.info(f"ربات در هر دو کانال ادمین است. بررسی عضویت کاربر {user_id}...")
+
+        # بررسی عضویت کاربر
         chat_member1 = await context.bot.get_chat_member(CHANNEL_1, user_id)
         chat_member2 = await context.bot.get_chat_member(CHANNEL_2, user_id)
+
+        logger.info(f"وضعیت کاربر {user_id} در کانال ۱: {chat_member1.status}")
+        logger.info(f"وضعیت کاربر {user_id} در کانال ۲: {chat_member2.status}")
 
         if chat_member1.status in ["member", "administrator", "creator"] and \
            chat_member2.status in ["member", "administrator", "creator"]:
@@ -389,8 +414,8 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(LANGUAGES[lang]["join_channels"])
             logger.warning(f"کاربر {user_id} در هر دو کانال عضو نیست")
     except Exception as e:
-        await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
         logger.error(f"خطا در بررسی عضویت کاربر {user_id}: {str(e)}")
+        await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
