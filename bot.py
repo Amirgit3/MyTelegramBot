@@ -30,9 +30,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# لینک کانال‌ها
-CHANNEL_1 = "@enrgy_m"
-CHANNEL_2 = "@music_bik"
+# لینک کانال‌ها (به فرمت HTTPS)
+CHANNEL_1 = "https://t.me/enrgy_m"
+CHANNEL_2 = "https://t.me/music_bik"
 
 # مسیر دیتابیس
 DB_PATH = "user_limits.db"
@@ -238,15 +238,15 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         bot_id = (await context.bot.get_me()).id
         timeout = 15
-        bot_member1 = await asyncio.wait_for(context.bot.get_chat_member(CHANNEL_1, bot_id), timeout)
-        bot_member2 = await asyncio.wait_for(context.bot.get_chat_member(CHANNEL_2, bot_id), timeout)
+        bot_member1 = await asyncio.wait_for(context.bot.get_chat_member("@enrgy_m", bot_id), timeout)
+        bot_member2 = await asyncio.wait_for(context.bot.get_chat_member("@music_bik", bot_id), timeout)
 
         if bot_member1.status not in ["administrator", "creator"] or bot_member2.status not in ["administrator", "creator"]:
             await query.message.reply_text("ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.")
             return
 
-        chat_member1 = await asyncio.wait_for(context.bot.get_chat_member(CHANNEL_1, user_id), timeout)
-        chat_member2 = await asyncio.wait_for(context.bot.get_chat_member(CHANNEL_2, user_id), timeout)
+        chat_member1 = await asyncio.wait_for(context.bot.get_chat_member("@enrgy_m", user_id), timeout)
+        chat_member2 = await asyncio.wait_for(context.bot.get_chat_member("@music_bik", user_id), timeout)
 
         if chat_member1.status in ["member", "administrator", "creator"] and \
            chat_member2.status in ["member", "administrator", "creator"]:
@@ -477,8 +477,8 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        chat_member1 = await context.bot.get_chat_member(CHANNEL_1, user_id)
-        chat_member2 = await context.bot.get_chat_member(CHANNEL_2, user_id)
+        chat_member1 = await context.bot.get_chat_member("@enrgy_m", user_id)
+        chat_member2 = await context.bot.get_chat_member("@music_bik", user_id)
         if not (chat_member1.status in ["member", "administrator", "creator"] and
                 chat_member2.status in ["member", "administrator", "creator"]):
             results = [InlineQueryResultArticle(id="membership", title="عضویت در کانال", input_message_content=InputTextMessageContent(LANGUAGES[lang]["join_channels"]))]
