@@ -2,8 +2,7 @@ import os
 import subprocess
 import logging
 import sqlite3
-import queue
-import threading
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 from telegram.error import BadRequest
@@ -13,10 +12,9 @@ import re
 import tempfile
 import shutil
 from contextlib import contextmanager
-import asyncio
 import time
 from dotenv import load_dotenv
-import flask
+from aiohttp import web
 
 # بارگذاری توکن و اطلاعات اینستاگرام از .env
 load_dotenv()
@@ -39,9 +37,8 @@ CHANNEL_2 = "@music_bik"
 # مسیر دیتابیس
 DB_PATH = "user_limits.db"
 
-# صف برای مدیریت درخواست‌ها
-request_queue = queue.Queue()
-queue_lock = threading.Lock()
+# صف برای مدیریت درخواست‌ها (به صورت asyncio.Queue)
+request_queue = asyncio.Queue()
 
 # زبان‌ها
 LANGUAGES = {
@@ -298,7 +295,6 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
         if d['status'] == 'downloading':
             percent = d.get('downloaded_bytes', 0) / d.get('total_bytes', 1) * 100
             if percent:
-                # به جای asyncio.create_task، از context.bot.send_message استفاده می‌کنیم
                 asyncio.ensure_future(
                     update.message.reply_text(LANGUAGES[lang]["progress"].format(round(percent, 2)))
                 )
@@ -309,10 +305,10 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
         return await loop.run_in_executor(None, lambda: ydl.download([url]))
 
 # پردازش صف درخواست‌ها
-async def process_queue(app):
+async def process_queue():
     while True:
         try:
-            update, context, url, processing_msg = request_queue.get(block=True)
+            update, context, url, processing_msg = await request_queue.get()
             await handle_request(update, context, url, processing_msg)
             request_queue.task_done()
         except Exception as e:
@@ -493,8 +489,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]])
     )
 
-    with queue_lock:
-        request_queue.put((update, context, url, processing_msg))
+    await request_queue.put((update, context, url, processing_msg))
     logger.info(f"درخواست کاربر {user_id} به صف اضافه شد: {url}")
 
 async def process_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE, url, processing_msg):
@@ -833,6 +828,10 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
     logger.info(f"کاربر {user_id} لینک معتبر در inline فرستاد: {query}")
 
+# تنظیم سرور aiohttp برای health check
+async def health_check(request):
+    return web.Response(text="OK")
+
 async def run_bot(application):
     # حذف Webhook قبل از شروع Polling
     await application.bot.delete_webhook(drop_pending_updates=True)
@@ -845,13 +844,13 @@ async def run_bot(application):
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(InlineQueryHandler(inline_query))
 
-    # شروع پردازش صف به صورت هم‌زمان
-    asyncio.create_task(process_queue(application))
+    # شروع پردازش صف
+    asyncio.create_task(process_queue())
 
     # اجرای Polling
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-def main():
+async def main():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
@@ -860,29 +859,30 @@ def main():
     # تنظیم تایم‌اوت بزرگ‌تر برای درخواست‌ها
     application = Application.builder().token(BOT_TOKEN).read_timeout(20).write_timeout(20).connect_timeout(20).build()
 
-    # تنظیم Flask برای health check
-    app_flask = flask.Flask(__name__)
+    # تنظیم سرور aiohttp
+    app = web.Application()
+    app.router.add_get('/', health_check)
 
-    @app_flask.route('/')
-    def health_check():
-        return "OK", 200
+    # اجرای aiohttp و ربات به صورت هم‌زمان
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    logger.info("سرور aiohttp برای health check روی پورت 8080 شروع شد")
 
-    # اجرای Flask در نخ جداگانه
-    flask_thread = threading.Thread(target=lambda: app_flask.run(host='0.0.0.0', port=8080), daemon=True)
-    flask_thread.start()
-
-    # اجرای ربات به صورت هم‌زمان
     try:
-        asyncio.run(run_bot(application))
+        await run_bot(application)
         logger.info("ربات شروع شد")
     except KeyboardInterrupt:
         logger.info("در حال متوقف کردن ربات...")
-        asyncio.run(asyncio.sleep(5))  # تاخیر 5 ثانیه‌ای برای تمیز کردن
+        await asyncio.sleep(5)  # تاخیر 5 ثانیه‌ای برای تمیز کردن
         logger.info("ربات متوقف شد")
     except Exception as e:
         logger.error(f"خطای غیرمنتظره در ربات: {str(e)}")
-        asyncio.run(asyncio.sleep(5))  # تاخیر برای تمیز کردن
+        await asyncio.sleep(5)  # تاخیر برای تمیز کردن
         logger.info("ربات متوقف شد")
+    finally:
+        await runner.cleanup()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
