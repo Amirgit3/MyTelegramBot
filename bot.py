@@ -759,20 +759,20 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
     logger.info(f"کاربر {user_id} لینک معتبر در inline فرستاد: {query}")
 
-def main():
+async def main():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
 
     init_db()
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("ping", ping))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(CallbackQueryHandler(button_callback))
-    app.add_handler(InlineQueryHandler(inline_query))
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(InlineQueryHandler(inline_query))
 
-    queue_thread = threading.Thread(target=process_queue, args=(app,), daemon=True)
+    queue_thread = threading.Thread(target=process_queue, args=(application,), daemon=True)
     queue_thread.start()
 
     # تنظیم برای اجرای وب در Koyeb با پورت 8080
@@ -781,9 +781,19 @@ def main():
     @app_flask.route('/')
     def health_check():
         return "OK", 200
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    # اجرای غیرهمزمان Application
+    async def run_application():
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await application.updater.idle()
+
+    # اجرای Flask و Application به صورت همزمان
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_application())
     app_flask.run(host='0.0.0.0', port=8080)
     logger.info("ربات شروع شد")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
