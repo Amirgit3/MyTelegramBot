@@ -6,7 +6,7 @@ import queue
 import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
-from telegram.error import BadRequest  # اضافه شده برای رفع NameError
+from telegram.error import BadRequest
 import yt_dlp
 from datetime import datetime
 import re
@@ -16,6 +16,7 @@ from contextlib import contextmanager
 import asyncio
 import time
 from dotenv import load_dotenv
+import flask
 
 # بارگذاری توکن و اطلاعات اینستاگرام از .env
 load_dotenv()
@@ -92,7 +93,7 @@ LANGUAGES = {
         "processing": "Обработка вашего запроса, пожалуйста, подождите...",
         "progress": "Прогресс загрузки: {}%",
         "cancel": "Запрос отменен.",
-        "ping": "Понг! Время ответа: {} мس",
+        "ping": "Понг! Время ответа: {} мс",
         "in_queue": "Ваш запрос в очереди. Пожалуйста, подождите..."
     },
     "es": {
@@ -433,7 +434,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_1}")
             await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
             return
-        except BadRequest as e:  # اصلاح شده به BadRequest
+        except BadRequest as e:
             logger.error(f"خطای BadRequest برای کاربر {user_id} در کانال {CHANNEL_1}: {str(e)}")
             await query.message.reply_text("خطا: ربات نمی‌تواند عضویت شما را بررسی کند. لطفاً دوباره امتحان کنید.")
             return
@@ -448,7 +449,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_2}")
             await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
             return
-        except BadRequest as e:  # اصلاح شده به BadRequest
+        except BadRequest as e:
             logger.error(f"خطای BadRequest برای کاربر {user_id} در کانال {CHANNEL_2}: {str(e)}")
             await query.message.reply_text("خطا: ربات نمی‌تواند عضویت شما را بررسی کند. لطفاً دوباره امتحان کنید.")
             return
@@ -835,6 +836,25 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
     logger.info(f"کاربر {user_id} لینک معتبر در inline فرستاد: {query}")
 
+async def run_bot(application):
+    # حذف Webhook قبل از شروع Polling
+    await application.bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Webhook با موفقیت حذف شد")
+
+    # اضافه کردن هندلرها
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    application.add_handler(InlineQueryHandler(inline_query))
+
+    # شروع نخ صف
+    queue_thread = threading.Thread(target=process_queue, args=(application,), daemon=True)
+    queue_thread.start()
+
+    # اجرای Polling به صورت هم‌زمان
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
 def main():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
@@ -844,44 +864,28 @@ def main():
     # تنظیم تایم‌اوت بزرگ‌تر برای درخواست‌ها
     application = Application.builder().token(BOT_TOKEN).read_timeout(20).write_timeout(20).connect_timeout(20).build()
 
-    # حذف Webhook قبل از شروع Polling
-    async def delete_webhook():
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Webhook با موفقیت حذف شد")
-
-    # اجرای حذف Webhook
-    asyncio.run(delete_webhook())
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(InlineQueryHandler(inline_query))
-
-    queue_thread = threading.Thread(target=process_queue, args=(application,), daemon=True)
-    queue_thread.start()
-
-    # تنظیم برای اجرای وب در Koyeb با پورت 8080
-    import flask
+    # تنظیم Flask
     app_flask = flask.Flask(__name__)
 
     @app_flask.route('/')
     def health_check():
         return "OK", 200
 
-    # اجرای Flask در یک نخ جداگانه
-    from threading import Thread
-    flask_thread = Thread(target=lambda: app_flask.run(host='0.0.0.0', port=8080), daemon=True)
+    # اجرای Flask در نخ جداگانه
+    flask_thread = threading.Thread(target=lambda: app_flask.run(host='0.0.0.0', port=8080), daemon=True)
     flask_thread.start()
 
+    # اجرای ربات به صورت هم‌زمان
     try:
-        # اجرای Application به صورت هم‌زمان
-        application.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=())
+        asyncio.run(run_bot(application))
         logger.info("ربات شروع شد")
-    finally:
-        # اضافه کردن تاخیر برای اطمینان از توقف کامل
+    except KeyboardInterrupt:
         logger.info("در حال متوقف کردن ربات...")
         asyncio.run(asyncio.sleep(5))  # تاخیر 5 ثانیه‌ای برای تمیز کردن
+        logger.info("ربات متوقف شد")
+    except Exception as e:
+        logger.error(f"خطای غیرمنتظره در ربات: {str(e)}")
+        asyncio.run(asyncio.sleep(5))  # تاخیر برای تمیز کردن
         logger.info("ربات متوقف شد")
 
 if __name__ == "__main__":
