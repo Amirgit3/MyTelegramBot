@@ -848,7 +848,20 @@ async def run_bot(application):
     asyncio.create_task(process_queue())
 
     # اجرای Polling
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    await application.initialize()
+    logger.info("Application initialized")
+    await application.start()
+    logger.info("Application started")
+    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("Polling started")
+
+async def shutdown(application, runner):
+    logger.info("در حال متوقف کردن ربات...")
+    await application.updater.stop()
+    await application.stop()
+    await application.shutdown()
+    await runner.cleanup()
+    logger.info("ربات متوقف شد")
 
 async def main():
     if not BOT_TOKEN:
@@ -863,7 +876,7 @@ async def main():
     app = web.Application()
     app.router.add_get('/', health_check)
 
-    # اجرای aiohttp و ربات به صورت هم‌زمان
+    # اجرای aiohttp
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
@@ -872,17 +885,19 @@ async def main():
 
     try:
         await run_bot(application)
-        logger.info("ربات شروع شد")
     except KeyboardInterrupt:
-        logger.info("در حال متوقف کردن ربات...")
-        await asyncio.sleep(5)  # تاخیر 5 ثانیه‌ای برای تمیز کردن
-        logger.info("ربات متوقف شد")
+        await shutdown(application, runner)
     except Exception as e:
         logger.error(f"خطای غیرمنتظره در ربات: {str(e)}")
-        await asyncio.sleep(5)  # تاخیر برای تمیز کردن
-        logger.info("ربات متوقف شد")
+        await shutdown(application, runner)
     finally:
-        await runner.cleanup()
+        await asyncio.sleep(5)  # تاخیر برای تمیز کردن
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # اجرای main در حلقه رویداد
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
