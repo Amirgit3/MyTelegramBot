@@ -383,9 +383,31 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_id = (await context.bot.get_me()).id
         logger.info(f"آیدی ربات: {bot_id}")
 
-        bot_member1 = await context.bot.get_chat_member(CHANNEL_1, bot_id)
-        bot_member2 = await context.bot.get_chat_member(CHANNEL_2, bot_id)
+        # تنظیم تایم‌اوت برای درخواست‌ها
+        timeout = 10  # 10 ثانیه
+        try:
+            bot_member1 = await asyncio.wait_for(
+                context.bot.get_chat_member(CHANNEL_1, bot_id),
+                timeout=timeout
+            )
+            logger.info(f"وضعیت ربات در کانال {CHANNEL_1}: {bot_member1.status}")
+        except asyncio.TimeoutError:
+            logger.error(f"تایم‌اوت در بررسی وضعیت ربات در کانال {CHANNEL_1}")
+            await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
+            return
 
+        try:
+            bot_member2 = await asyncio.wait_for(
+                context.bot.get_chat_member(CHANNEL_2, bot_id),
+                timeout=timeout
+            )
+            logger.info(f"وضعیت ربات در کانال {CHANNEL_2}: {bot_member2.status}")
+        except asyncio.TimeoutError:
+            logger.error(f"تایم‌اوت در بررسی وضعیت ربات در کانال {CHANNEL_2}")
+            await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
+            return
+
+        # چک کردن ادمین بودن ربات
         if bot_member1.status not in ["administrator", "creator"]:
             logger.error(f"ربات در کانال {CHANNEL_1} ادمین نیست. وضعیت: {bot_member1.status}")
             await query.message.reply_text("ربات باید در کانال ۱ ادمین باشد. لطفاً ادمین کنید و دوباره امتحان کنید.")
@@ -399,11 +421,27 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"ربات در هر دو کانال ادمین است. بررسی عضویت کاربر {user_id}...")
 
         # بررسی عضویت کاربر
-        chat_member1 = await context.bot.get_chat_member(CHANNEL_1, user_id)
-        chat_member2 = await context.bot.get_chat_member(CHANNEL_2, user_id)
+        try:
+            chat_member1 = await asyncio.wait_for(
+                context.bot.get_chat_member(CHANNEL_1, user_id),
+                timeout=timeout
+            )
+            logger.info(f"وضعیت کاربر {user_id} در کانال ۱: {chat_member1.status}")
+        except asyncio.TimeoutError:
+            logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_1}")
+            await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
+            return
 
-        logger.info(f"وضعیت کاربر {user_id} در کانال ۱: {chat_member1.status}")
-        logger.info(f"وضعیت کاربر {user_id} در کانال ۲: {chat_member2.status}")
+        try:
+            chat_member2 = await asyncio.wait_for(
+                context.bot.get_chat_member(CHANNEL_2, user_id),
+                timeout=timeout
+            )
+            logger.info(f"وضعیت کاربر {user_id} در کانال ۲: {chat_member2.status}")
+        except asyncio.TimeoutError:
+            logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_2}")
+            await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
+            return
 
         if chat_member1.status in ["member", "administrator", "creator"] and \
            chat_member2.status in ["member", "administrator", "creator"]:
