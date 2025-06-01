@@ -294,33 +294,30 @@ def is_valid_url(url):
 
 # دانلود غیرهمزمان با yt-dlp
 async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
-    loop = asyncio.get_event_loop()
-
     def progress_hook(d):
         if d['status'] == 'downloading':
             percent = d.get('downloaded_bytes', 0) / d.get('total_bytes', 1) * 100
             if percent:
-                asyncio.create_task(
+                # به جای asyncio.create_task، از context.bot.send_message استفاده می‌کنیم
+                asyncio.ensure_future(
                     update.message.reply_text(LANGUAGES[lang]["progress"].format(round(percent, 2)))
                 )
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.add_progress_hook(progress_hook)
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, lambda: ydl.download([url]))
 
 # پردازش صف درخواست‌ها
-def process_queue(app):
+async def process_queue(app):
     while True:
         try:
             update, context, url, processing_msg = request_queue.get(block=True)
-            asyncio.run_coroutine_threadsafe(
-                handle_request(update, context, url, processing_msg),
-                app.loop
-            )
+            await handle_request(update, context, url, processing_msg)
             request_queue.task_done()
         except Exception as e:
             logger.error(f"خطا در پردازش صف: {str(e)}")
-            time.sleep(5)  # تاخیر در صورت خطا برای جلوگیری از لوپ سریع
+            await asyncio.sleep(5)  # تاخیر در صورت خطا برای جلوگیری از لوپ سریع
 
 async def handle_request(update, context, url, processing_msg):
     lang = context.user_data.get("language", "fa")
@@ -653,7 +650,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.warning(f"کاربر {user_id} در دانلود صوت به محدودیت رسید")
                         return
                     update_user_limit(user_id, file_size)
-                    await query.message.reply_audio(open(file_path, "rb"))
+                    await query.message.reply_audio(audio=open(file_path, "rb"))
                     logger.info(f"کاربر {user_id} صوت یوتیوب ({audio_format}) را دانلود کرد")
                 elif data[2] == "sub":
                     sub_lang = data[3]
@@ -668,7 +665,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if os.path.exists(subtitle_file):
                         file_size = os.path.getsize(subtitle_file)
                         update_user_limit(user_id, file_size)
-                        await query.message.reply_document(open(subtitle_file, "rb"))
+                        await query.message.reply_document(document=open(subtitle_file, "rb"))
                         logger.info(f"کاربر {user_id} زیرنویس ({sub_lang}) را دانلود کرد")
                     else:
                         await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
@@ -702,12 +699,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         ], check=True, capture_output=True)
                         for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
                             part_path = os.path.join(temp_dir, part_file)
-                            await query.message.reply_video(open(part_path, "rb"))
+                            await query.message.reply_video(video=open(part_path, "rb"))
                             await asyncio.sleep(1)
                             logger.info(f"کاربر {user_id} بخش ویدئو را فرستاد: {part_file}")
                         logger.info(f"کاربر {user_id} ویدئوی یوتیوب را به‌صورت تکه‌تکه دانلود کرد")
                     else:
-                        await query.message.reply_video(open(input_file, "rb"))
+                        await query.message.reply_video(video=open(input_file, "rb"))
                         logger.info(f"کاربر {user_id} ویدئوی یوتیوب را دانلود کرد")
 
             elif data[0] == "ig":
@@ -745,17 +742,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
                             part_path = os.path.join(temp_dir, part_file)
                             if media_type in ["jpg", "jpeg", "png"]:
-                                await query.message.reply_photo(open(part_path, "rb"))
+                                await query.message.reply_photo(photo=open(part_path, "rb"))
                             else:
-                                await query.message.reply_video(open(part_path, "rb"))
+                                await query.message.reply_video(video=open(part_path, "rb"))
                             await asyncio.sleep(1)
                             logger.info(f"کاربر {user_id} بخش اینستاگرام را فرستاد: {part_file}")
                         logger.info(f"کاربر {user_id} مدیای اینستاگرام را به‌صورت تکه‌تکه دانلود کرد")
                     else:
                         if media_type in ["jpg", "jpeg", "png"]:
-                            await query.message.reply_photo(open(file_path, "rb"))
+                            await query.message.reply_photo(photo=open(file_path, "rb"))
                         else:
-                            await query.message.reply_video(open(file_path, "rb"))
+                            await query.message.reply_video(video=open(file_path, "rb"))
                         logger.info(f"کاربر {user_id} مدیای اینستاگرام را دانلود کرد")
 
         except yt_dlp.DownloadError as e:
@@ -844,15 +841,14 @@ async def run_bot(application):
     # اضافه کردن هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(filters.Text() & ~filters.Command(), handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(InlineQueryHandler(inline_query))
 
-    # شروع نخ صف
-    queue_thread = threading.Thread(target=process_queue, args=(application,), daemon=True)
-    queue_thread.start()
+    # شروع پردازش صف به صورت هم‌زمان
+    asyncio.create_task(process_queue(application))
 
-    # اجرای Polling به صورت هم‌زمان
+    # اجرای Polling
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 def main():
@@ -864,7 +860,7 @@ def main():
     # تنظیم تایم‌اوت بزرگ‌تر برای درخواست‌ها
     application = Application.builder().token(BOT_TOKEN).read_timeout(20).write_timeout(20).connect_timeout(20).build()
 
-    # تنظیم Flask
+    # تنظیم Flask برای health check
     app_flask = flask.Flask(__name__)
 
     @app_flask.route('/')
