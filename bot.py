@@ -6,6 +6,7 @@ import queue
 import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
+from telegram.error import BadRequest  # اضافه شده برای رفع NameError
 import yt_dlp
 from datetime import datetime
 import re
@@ -31,8 +32,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # لینک کانال‌ها
-CHANNEL_1 = "t.me/enrgy_m"
-CHANNEL_2 = "t.me/music_bik"
+CHANNEL_1 = "@enrgy_m"
+CHANNEL_2 = "@music_bik"
 
 # مسیر دیتابیس
 DB_PATH = "user_limits.db"
@@ -91,7 +92,7 @@ LANGUAGES = {
         "processing": "Обработка вашего запроса, пожалуйста, подождите...",
         "progress": "Прогресс загрузки: {}%",
         "cancel": "Запрос отменен.",
-        "ping": "Понг! Время ответа: {} мс",
+        "ping": "Понг! Время ответа: {} мس",
         "in_queue": "Ваш запрос в очереди. Пожалуйста, подождите..."
     },
     "es": {
@@ -168,7 +169,7 @@ LANGUAGES = {
         "invalid_link": "رابط غير صالح! فقط روابط إنستغرام أو يوتيوب.",
         "file_too_large": "ملفك أكبر من 500 ميجابايت!",
         "join_channels": "يرجى الانضمام إلى كلا القناتين والمحاولة مرة أخرى.",
-        "membership_ok": "تم التحقق من العضوية! أرسل رابط إنستغرام أو يوتیوب.",
+        "membership_ok": "تم التحقق من العضوية! أرسل رابط إنستغرام أو یوتیوب.",
         "choose_option": "اختر خيارًا:",
         "no_subtitle": "الترجمة غير متوفرة!",
         "error": "خطأ: {}",
@@ -318,6 +319,7 @@ def process_queue(app):
             request_queue.task_done()
         except Exception as e:
             logger.error(f"خطا در پردازش صف: {str(e)}")
+            time.sleep(5)  # تاخیر در صورت خطا برای جلوگیری از لوپ سریع
 
 async def handle_request(update, context, url, processing_msg):
     lang = context.user_data.get("language", "fa")
@@ -384,7 +386,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"آیدی ربات: {bot_id}")
 
         # تنظیم تایم‌اوت برای درخواست‌ها
-        timeout = 10  # 10 ثانیه
+        timeout = 15  # 15 ثانیه
         try:
             bot_member1 = await asyncio.wait_for(
                 context.bot.get_chat_member(CHANNEL_1, bot_id),
@@ -431,6 +433,10 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_1}")
             await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
             return
+        except BadRequest as e:  # اصلاح شده به BadRequest
+            logger.error(f"خطای BadRequest برای کاربر {user_id} در کانال {CHANNEL_1}: {str(e)}")
+            await query.message.reply_text("خطا: ربات نمی‌تواند عضویت شما را بررسی کند. لطفاً دوباره امتحان کنید.")
+            return
 
         try:
             chat_member2 = await asyncio.wait_for(
@@ -441,6 +447,10 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except asyncio.TimeoutError:
             logger.error(f"تایم‌اوت در بررسی عضویت کاربر {user_id} در کانال {CHANNEL_2}")
             await query.message.reply_text("خطا: پاسخ از تلگرام دریافت نشد. لطفاً دوباره امتحان کنید.")
+            return
+        except BadRequest as e:  # اصلاح شده به BadRequest
+            logger.error(f"خطای BadRequest برای کاربر {user_id} در کانال {CHANNEL_2}: {str(e)}")
+            await query.message.reply_text("خطا: ربات نمی‌تواند عضویت شما را بررسی کند. لطفاً دوباره امتحان کنید.")
             return
 
         if chat_member1.status in ["member", "administrator", "creator"] and \
@@ -454,6 +464,8 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"خطا در بررسی عضویت کاربر {user_id}: {str(e)}")
         await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
+    finally:
+        logger.info(f"پایان بررسی عضویت برای کاربر {user_id}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -593,6 +605,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data[0] == "check_membership":
+        await query.message.reply_text("در حال بررسی...")
         await check_membership(update, context)
         return
     elif data[0] == "settings":
@@ -828,7 +841,17 @@ def main():
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
 
     init_db()
-    application = Application.builder().token(BOT_TOKEN).build()
+    # تنظیم تایم‌اوت بزرگ‌تر برای درخواست‌ها
+    application = Application.builder().token(BOT_TOKEN).read_timeout(20).write_timeout(20).connect_timeout(20).build()
+
+    # حذف Webhook قبل از شروع Polling
+    async def delete_webhook():
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook با موفقیت حذف شد")
+
+    # اجرای حذف Webhook
+    asyncio.run(delete_webhook())
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -841,6 +864,7 @@ def main():
     # تنظیم برای اجرای وب در Koyeb با پورت 8080
     import flask
     app_flask = flask.Flask(__name__)
+
     @app_flask.route('/')
     def health_check():
         return "OK", 200
@@ -850,9 +874,15 @@ def main():
     flask_thread = Thread(target=lambda: app_flask.run(host='0.0.0.0', port=8080), daemon=True)
     flask_thread.start()
 
-    # اجرای Application به صورت هم‌زمان
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-    logger.info("ربات شروع شد")
+    try:
+        # اجرای Application به صورت هم‌زمان
+        application.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=())
+        logger.info("ربات شروع شد")
+    finally:
+        # اضافه کردن تاخیر برای اطمینان از توقف کامل
+        logger.info("در حال متوقف کردن ربات...")
+        asyncio.run(asyncio.sleep(5))  # تاخیر 5 ثانیه‌ای برای تمیز کردن
+        logger.info("ربات متوقف شد")
 
 if __name__ == "__main__":
     main()
