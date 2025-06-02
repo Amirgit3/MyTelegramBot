@@ -3,6 +3,7 @@ import subprocess
 import logging
 import sqlite3
 import asyncio
+import psutil
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 from telegram.error import TelegramError, BadRequest
@@ -22,7 +23,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 
-# تنظیم لاگ‌گیری برای Koyeb (به جای فایل، به stdout)
+# تنظیم لاگ‌گیری برای Koyeb (به stdout)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -30,15 +31,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# لینک کانال‌ها (به فرمت HTTPS برای استفاده در URL)
+# لینک کانال‌ها (به فرمت HTTPS)
 CHANNEL_1 = "https://t.me/enrgy_m"
 CHANNEL_2 = "https://t.me/music_bik"
 
 # مسیر دیتابیس
 DB_PATH = "user_limits.db"
 
-# صف برای مدیریت درخواست‌ها (به صورت asyncio.Queue)
+# صف برای مدیریت درخواست‌ها
 request_queue = asyncio.Queue()
+
+# Semaphore برای محدود کردن دانلودهای همزمان
+download_semaphore = asyncio.Semaphore(2)  # حداکثر ۲ دانلود همزمان
 
 # زبان‌ها
 LANGUAGES = {
@@ -57,7 +61,8 @@ LANGUAGES = {
         "progress": "Download progress: {}%",
         "cancel": "Request cancelled.",
         "ping": "Pong! Response time: {}ms",
-        "in_queue": "Your request is in queue. Please wait..."
+        "in_queue": "Your request is in queue. Please wait...",
+        "estimated_time": "Download started. Estimated time: {} seconds"
     },
     "fa": {
         "name": "فارسی",
@@ -74,7 +79,8 @@ LANGUAGES = {
         "progress": "پیشرفت دانلود: {}%",
         "cancel": "درخواست لغو شد.",
         "ping": "پینگ! زمان پاسخ: {} میلی‌ثانیه",
-        "in_queue": "درخواست شما در صف قرار داره. لطفاً صبر کنید..."
+        "in_queue": "درخواست شما در صف قرار داره. لطفاً صبر کنید...",
+        "estimated_time": "دانلود شروع شد. زمان تقریبی: {} ثانیه"
     },
     "ru": {
         "name": "Русский",
@@ -91,7 +97,8 @@ LANGUAGES = {
         "progress": "Прогресс загрузки: {}%",
         "cancel": "Запрос отменен.",
         "ping": "Понг! Время ответа: {} мс",
-        "in_queue": "Ваш запрос в очереди. Пожалуйста, подождите..."
+        "in_queue": "Ваш запрос в очереди. Пожалуйста, подождите...",
+        "estimated_time": "Загрузка началась. Примерное время: {} секунд"
     },
     "es": {
         "name": "Español",
@@ -108,7 +115,8 @@ LANGUAGES = {
         "progress": "Progreso de la descarga: {}%",
         "cancel": "Solicitud cancelada.",
         "ping": "¡Pong! Tiempo de respuesta: {} ms",
-        "in_queue": "Tu solicitud está en cola. Por favor espera..."
+        "in_queue": "Tu solicitud está en cola. Por favor espera...",
+        "estimated_time": "Descarga iniciada. Tiempo estimado: {} segundos"
     },
     "fr": {
         "name": "Français",
@@ -125,7 +133,8 @@ LANGUAGES = {
         "progress": "Progression du téléchargement : {}%",
         "cancel": "Demande annulée.",
         "ping": "Pong ! Temps de réponse : {} ms",
-        "in_queue": "Votre demande est en file d'attente. Veuillez patienter..."
+        "in_queue": "Votre demande est en file d'attente. Veuillez patienter...",
+        "estimated_time": "Téléchargement commencé. Temps estimé : {} secondes"
     },
     "de": {
         "name": "Deutsch",
@@ -142,7 +151,8 @@ LANGUAGES = {
         "progress": "Download-Fortschritt: {}%",
         "cancel": "Anfrage abgebrochen.",
         "ping": "Pong! Antwortzeit: {} ms",
-        "in_queue": "Deine Anfrage ist in der Warteschlange. Bitte warte..."
+        "in_queue": "Deine Anfrage ist in der Warteschlange. Bitte warte...",
+        "estimated_time": "Download gestartet. Geschätzte Zeit: {} Sekunden"
     },
     "it": {
         "name": "Italiano",
@@ -159,7 +169,8 @@ LANGUAGES = {
         "progress": "Progresso del download: {}%",
         "cancel": "Richiesta annullata.",
         "ping": "Pong! Tempo di risposta: {} ms",
-        "in_queue": "La tua richiesta è in coda. Per favore attendi..."
+        "in_queue": "La tua richiesta è in coda. Per favore attendi...",
+        "estimated_time": "Download iniziato. Tempo stimato: {} secondi"
     },
     "ar": {
         "name": "العربية",
@@ -176,7 +187,8 @@ LANGUAGES = {
         "progress": "تقدم التحميل: {}%",
         "cancel": "تم إلغاء الطلب.",
         "ping": "بينغ! زمن الاستجابة: {} مللي ثانية",
-        "in_queue": "طلبك في الانتظار. يرجى الانتظار..."
+        "in_queue": "طلبك في الانتظار. يرجى الانتظار...",
+        "estimated_time": "بدأ التحميل. الوقت المقدر: {} ثانية"
     },
     "zh": {
         "name": "中文",
@@ -193,7 +205,8 @@ LANGUAGES = {
         "progress": "下载进度：{}%",
         "cancel": "请求已取消。",
         "ping": "Pong！响应时间：{}毫秒",
-        "in_queue": "您的请求正在排队。请稍候..."
+        "in_queue": "您的请求正在排队。请稍候...",
+        "estimated_time": "下载已开始。预计时间：{}秒"
     },
     "pt": {
         "name": "Português",
@@ -210,7 +223,8 @@ LANGUAGES = {
         "progress": "Progresso do download: {}%",
         "cancel": "Solicitação cancelada.",
         "ping": "Pong! Tempo de resposta: {} ms",
-        "in_queue": "Sua solicitação está na fila. Por favor, aguarde..."
+        "in_queue": "Sua solicitação está na fila. Por favor, aguarde...",
+        "estimated_time": "Download iniciado. Tempo estimado: {} segundos"
     }
 }
 
@@ -299,22 +313,76 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
                 asyncio.ensure_future(
                     update.message.reply_text(LANGUAGES[lang]["progress"].format(round(percent, 2)))
                 )
+        elif d['status'] == 'error':
+            asyncio.ensure_future(
+                update.message.reply_text(LANGUAGES[lang]["error"].format("خطا در دانلود فایل"))
+            )
 
+    # بررسی حافظه آزاد
+    memory = psutil.virtual_memory()
+    if memory.available < 100 * 1024 * 1024:
+        await update.message.reply_text(LANGUAGES[lang]["error"].format("حافظه سرور کافی نیست."))
+        logger.error(f"حافظه ناکافی: {memory.available / (1024 * 1024):.2f} MB")
+        return False
+
+    # تخمین زمان دانلود
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.add_progress_hook(progress_hook)
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: ydl.download([url]))
+        info = ydl.extract_info(url, download=False)
+        file_size = info.get('filesize', 0) or 0
+        if file_size > 500 * 1024 * 1024:
+            await update.message.reply_text(LANGUAGES[lang]["file_too_large"])
+            return False
+
+    # اطلاع‌رسانی زمان تقریبی
+    estimated_time = file_size / (1024 * 1024) / 2  # فرض سرعت دانلود ۲ مگابایت بر ثانیه
+    await update.message.reply_text(LANGUAGES[lang]["estimated_time"].format(round(estimated_time)))
+
+    ydl_opts.update({
+        'buffer_size': 1024 * 1024,  # بافر ۱ مگابایتی
+    })
+
+    async with download_semaphore:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.add_progress_hook(progress_hook)
+            loop = asyncio.get_running_loop()
+            try:
+                start_time = time.time()
+                await loop.run_in_executor(None, lambda: ydl.download([url]))
+                duration = time.time() - start_time
+                logger.info(f"دانلود برای کاربر {update.effective_user.id} در {duration:.2f} ثانیه کامل شد")
+                return True
+            except yt_dlp.DownloadError as e:
+                logger.error(f"خطای دانلود: {str(e)}")
+                await update.message.reply_text(LANGUAGES[lang]["error"].format("خطا در دانلود فایل"))
+                return False
 
 # پردازش صف درخواست‌ها
 async def process_queue():
     while True:
         try:
             update, context, url, processing_msg = await request_queue.get()
-            await handle_request(update, context, url, processing_msg)
+            lang = context.user_data.get("language", "fa")
+            user_id = str(update.effective_user.id)
+            max_retries = 3
+            retry_count = 0
+
+            while retry_count < max_retries:
+                try:
+                    await handle_request(update, context, url, processing_msg)
+                    logger.info(f"درخواست کاربر {user_id} با موفقیت پردازش شد: {url}")
+                    break
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        await processing_msg.edit_text(LANGUAGES[lang]["error"].format("تلاش‌ها برای پردازش درخواست ناموفق بود."))
+                        logger.error(f"شکست نهایی در پردازش درخواست کاربر {user_id}: {str(e)}")
+                        break
+                    await asyncio.sleep(5)
+                    logger.warning(f"تلاش مجدد ({retry_count}/{max_retries}) برای کاربر {user_id}: {str(e)}")
             request_queue.task_done()
         except Exception as e:
-            logger.error(f"خطا در پردازش صف: {str(e)}")
-            await asyncio.sleep(5)  # تاخیر در صورت خطا برای جلوگیری از لوپ سریع
+            logger.error(f"خطای کلی در پردازش صف: {str(e)}")
+            await asyncio.sleep(10)
 
 async def handle_request(update, context, url, processing_msg):
     lang = context.user_data.get("language", "fa")
@@ -324,6 +392,10 @@ async def handle_request(update, context, url, processing_msg):
         if "youtube.com" in url or "youtu.be" in url:
             await process_youtube(update, context, url, processing_msg)
         elif "instagram.com" in url:
+            if not INSTAGRAM_USERNAME or not INSTAGRAM_PASSWORD:
+                await processing_msg.edit_text(LANGUAGES[lang]["error"].format("اطلاعات ورود به اینستاگرام تنظیم نشده است."))
+                logger.error(f"اطلاعات اینستاگرام برای کاربر {user_id} تنظیم نشده است.")
+                return
             await process_instagram(update, context, url, processing_msg)
         logger.info(f"درخواست کاربر {user_id} پردازش شد: {url}")
     except Exception as e:
@@ -382,7 +454,6 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_member2 = await context.bot.get_chat_member("@music_bik", bot_id)
             if bot_member1.status not in ["administrator", "creator"] or bot_member2.status not in ["administrator", "creator"]:
                 await query.message.reply_text("ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.")
-                logger.error(f"ربات در کانال‌ها ادمین نیست. وضعیت کانال ۱: {bot_member1.status}, کانال ۲: {bot_member2.status}")
                 return
         except TelegramError as e:
             logger.error(f"ربات نمی‌تواند وضعیت خودش را در کانال‌ها چک کند: {str(e)}")
@@ -397,10 +468,8 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
                chat_member2.status in ["member", "administrator", "creator"]:
                 context.user_data["is_member"] = True
                 await query.message.reply_text(LANGUAGES[lang]["membership_ok"])
-                logger.info(f"عضویت کاربر {user_id} تأیید شد")
             else:
                 await query.message.reply_text(LANGUAGES[lang]["join_channels"])
-                logger.warning(f"کاربر {user_id} در هر دو کانال عضو نیست")
         except TelegramError as e:
             logger.error(f"خطا در بررسی عضویت کاربر {user_id}: {str(e)}")
             await query.message.reply_text(LANGUAGES[lang]["error"].format("نمی‌توان عضویت را چک کرد. لطفاً دوباره امتحان کنید."))
@@ -541,6 +610,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data[0] == "cancel":
         context.user_data["cancel"] = True
+        new_queue = asyncio.Queue()
+        while not request_queue.empty():
+            req = await request_queue.get()
+            if req[0].effective_user.id != user_id or req[2] != data[1]:
+                await new_queue.put(req)
+            else:
+                logger.info(f"درخواست کاربر {user_id} برای لینک {data[1]} از صف حذف شد")
+            request_queue.task_done()
+        global request_queue
+        request_queue = new_queue
         await query.message.reply_text(LANGUAGES[lang]["cancel"])
         logger.info(f"کاربر {user_id} درخواست را برای لینک لغو کرد: {data[1]}")
         return
@@ -585,16 +664,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": audio_format}],
                         "quiet": True,
                     }
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    file_path = f"{temp_dir}/audio.{audio_format}"
-                    file_size = os.path.getsize(file_path)
-                    if not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
-                        logger.warning(f"کاربر {user_id} در دانلود صوت به محدودیت رسید")
-                        return
-                    update_user_limit(user_id, file_size)
-                    await query.message.reply_audio(audio=open(file_path, "rb"))
-                    logger.info(f"کاربر {user_id} صوت یوتیوب ({audio_format}) را دانلود کرد")
+                    if await download_with_yt_dlp(url, ydl_opts, context, query, lang):
+                        file_path = f"{temp_dir}/audio.{audio_format}"
+                        file_size = os.path.getsize(file_path)
+                        if not check_user_limit(user_id, file_size):
+                            await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
+                            logger.warning(f"کاربر {user_id} در دانلود صوت به محدودیت رسید")
+                            return
+                        update_user_limit(user_id, file_size)
+                        await query.message.reply_audio(audio=open(file_path, "rb"))
+                        logger.info(f"کاربر {user_id} صوت یوتیوب ({audio_format}) را دانلود کرد")
                 elif data[2] == "sub":
                     sub_lang = data[3]
                     ydl_opts = {
@@ -603,16 +682,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "outtmpl": f"{temp_dir}/subtitle.%(ext)s",
                         "quiet": True,
                     }
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    subtitle_file = f"{temp_dir}/subtitle.{sub_lang}.vtt"
-                    if os.path.exists(subtitle_file):
-                        file_size = os.path.getsize(subtitle_file)
-                        update_user_limit(user_id, file_size)
-                        await query.message.reply_document(document=open(subtitle_file, "rb"))
-                        logger.info(f"کاربر {user_id} زیرنویس ({sub_lang}) را دانلود کرد")
-                    else:
-                        await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
-                        logger.warning(f"زیرنویس برای کاربر {user_id} در دسترس نیست")
+                    if await download_with_yt_dlp(url, ydl_opts, context, query, lang):
+                        subtitle_file = f"{temp_dir}/subtitle.{sub_lang}.vtt"
+                        if os.path.exists(subtitle_file):
+                            file_size = os.path.getsize(subtitle_file)
+                            update_user_limit(user_id, file_size)
+                            await query.message.reply_document(document=open(subtitle_file, "rb"))
+                            logger.info(f"کاربر {user_id} زیرنویس ({sub_lang}) را دانلود کرد")
+                        else:
+                            await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
+                            logger.warning(f"زیرنویس برای کاربر {user_id} در دسترس نیست")
                 else:
                     format_id = data[2]
                     ydl_opts = {
@@ -620,35 +699,34 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "outtmpl": f"{temp_dir}/video.%(ext)s",
                         "quiet": True,
                     }
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
+                    if await download_with_yt_dlp(url, ydl_opts, context, query, lang):
+                        input_file = f"{temp_dir}/video.mp4" if os.path.exists(f"{temp_dir}/video.mp4") else f"{temp_dir}/video.webm"
+                        file_size = os.path.getsize(input_file)
+                        if file_size > 500 * 1024 * 1024:
+                            await processing_msg.edit_text(LANGUAGES[lang]["file_too_large"])
+                            logger.warning(f"فایل برای کاربر {user_id} بیش از حد بزرگ است: {file_size} بایت")
+                            return
+                        if not check_user_limit(user_id, file_size):
+                            await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
+                            logger.warning(f"کاربر {user_id} در دانلود ویدئو به محدودیت رسید")
+                            return
 
-                    input_file = f"{temp_dir}/video.mp4" if os.path.exists(f"{temp_dir}/video.mp4") else f"{temp_dir}/video.webm"
-                    file_size = os.path.getsize(input_file)
-                    if file_size > 500 * 1024 * 1024:
-                        await processing_msg.edit_text(LANGUAGES[lang]["file_too_large"])
-                        logger.warning(f"فایل برای کاربر {user_id} بیش از حد بزرگ است: {file_size} بایت")
-                        return
-                    if not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
-                        logger.warning(f"کاربر {user_id} در دانلود ویدئو به محدودیت رسید")
-                        return
-
-                    update_user_limit(user_id, file_size)
-                    if file_size > 49 * 1024 * 1024:
-                        output_template = f"{temp_dir}/part_%03d.mp4"
-                        subprocess.run([
-                            "ffmpeg", "-i", input_file, "-c", "copy", "-f", "segment",
-                            "-segment_time", "60", "-segment_size", "49000000", output_template
-                        ], check=True, capture_output=True)
-                        for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
-                            part_path = os.path.join(temp_dir, part_file)
-                            await query.message.reply_video(video=open(part_path, "rb"))
-                            await asyncio.sleep(1)
-                            logger.info(f"کاربر {user_id} بخش ویدئو را فرستاد: {part_file}")
-                        logger.info(f"کاربر {user_id} ویدئوی یوتیوب را به‌صورت تکه‌تکه دانلود کرد")
-                    else:
-                        await query.message.reply_video(video=open(input_file, "rb"))
-                        logger.info(f"کاربر {user_id} ویدئوی یوتیوب را دانلود کرد")
+                        update_user_limit(user_id, file_size)
+                        if file_size > 49 * 1024 * 1024:
+                            output_template = f"{temp_dir}/part_%03d.mp4"
+                            subprocess.run([
+                                "ffmpeg", "-i", input_file, "-c", "copy", "-f", "segment",
+                                "-segment_time", "60", "-segment_size", "49000000", output_template
+                            ], check=True, capture_output=True)
+                            for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
+                                part_path = os.path.join(temp_dir, part_file)
+                                await query.message.reply_video(video=open(part_path, "rb"))
+                                await asyncio.sleep(1)
+                                logger.info(f"کاربر {user_id} بخش ویدئو را فرستاد: {part_file}")
+                            logger.info(f"کاربر {user_id} ویدئوی یوتیوب را به‌صورت تکه‌تکه دانلود کرد")
+                        else:
+                            await query.message.reply_video(video=open(input_file, "rb"))
+                            logger.info(f"کاربر {user_id} ویدئوی یوتیوب را دانلود کرد")
 
             elif data[0] == "ig":
                 if data[2] == "caption":
@@ -663,40 +741,40 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "username": INSTAGRAM_USERNAME,
                         "password": INSTAGRAM_PASSWORD
                     }
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    file_path = f"{temp_dir}/media.{media_type}"
-                    file_size = os.path.getsize(file_path)
-                    if file_size > 500 * 1024 * 1024:
-                        await processing_msg.edit_text(LANGUAGES[lang]["file_too_large"])
-                        logger.warning(f"فایل برای کاربر {user_id} بیش از حد بزرگ است: {file_size} بایت")
-                        return
-                    if not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
-                        logger.warning(f"کاربر {user_id} در دانلود اینستاگرام به حداقل رسید")
-                        return
+                    if await download_with_yt_dlp(url, ydl_opts, context, query, lang):
+                        file_path = f"{temp_dir}/media.{media_type}"
+                        file_size = os.path.getsize(file_path)
+                        if file_size > 500 * 1024 * 1024:
+                            await processing_msg.edit_text(LANGUAGES[lang]["file_too_large"])
+                            logger.warning(f"فایل برای کاربر {user_id} بیش از حد بزرگ است: {file_size} بایت")
+                            return
+                        if not check_user_limit(user_id, file_size):
+                            await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
+                            logger.warning(f"کاربر {user_id} در دانلود اینستاگرام به حداقل رسید")
+                            return
 
-                    update_user_limit(user_id, file_size)
-                    if file_size > 49 * 1024 * 1024:
-                        output_template = f"{temp_dir}/part_%03d.mp4"
-                        subprocess.run([
-                            "ffmpeg", "-i", file_path, "-c", "copy", "-f", "segment",
-                            "-segment_time", "60", "-segment_size", "49000000", output_template
-                        ], check=True, capture_output=True)
-                        for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
-                            part_path = os.path.join(temp_dir, part_file)
-                            if media_type in ["jpg", "jpeg", "png"]:
-                                await query.message.reply_photo(photo=open(part_path, "rb"))
-                            else:
-                                await query.message.reply_video(video=open(part_path, "rb"))
-                            await asyncio.sleep(1)
-                            logger.info(f"کاربر {user_id} بخش اینستاگرام را فرستاد: {part_file}")
-                        logger.info(f"کاربر {user_id} مدیای اینستاگرام را به‌صورت تکه‌تکه دانلود کرد")
-                    else:
-                        if media_type in ["jpg", "jpeg", "png"]:
-                            await query.message.reply_photo(photo=open(file_path, "rb"))
+                        update_user_limit(user_id, file_size)
+                        if file_size > 49 * 1024 * 1024:
+                            output_template = f"{temp_dir}/part_%03d.mp4"
+                            subprocess.run([
+                                "ffmpeg", "-i", file_path, "-c", "copy", "-f", "segment",
+                                "-segment_time", "60", "-segment_size", "49000000", output_template
+                            ], check=True, capture_output=True)
+                            for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
+                                part_path = os.path.join(temp_dir, part_file)
+                                if media_type in ["jpg", "jpeg", "png"]:
+                                    await query.message.reply_photo(photo=open(part_path, "rb"))
+                                else:
+                                    await query.message.reply_video(video=open(part_path, "rb"))
+                                await asyncio.sleep(1)
+                                logger.info(f"کاربر {user_id} بخش اینستاگرام را فرستاد: {part_file}")
+                            logger.info(f"کاربر {user_id} مدیای اینستاگرام را به‌صورت تکه‌تکه دانلود کرد")
                         else:
-                            await query.message.reply_video(video=open(file_path, "rb"))
-                        logger.info(f"کاربر {user_id} مدیای اینستاگرام را دانلود کرد")
+                            if media_type in ["jpg", "jpeg", "png"]:
+                                await query.message.reply_photo(photo=open(file_path, "rb"))
+                            else:
+                                await query.message.reply_video(video=open(file_path, "rb"))
+                            logger.info(f"کاربر {user_id} مدیای اینستاگرام را دانلود کرد")
 
         except yt_dlp.DownloadError as e:
             error_msg = "لینک خصوصی است یا دسترسی محدود دارد."
@@ -776,15 +854,19 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results)
     logger.info(f"کاربر {user_id} لینک معتبر در inline فرستاد: {query}")
 
-# تنظیم سرور aiohttp برای health check
+# تنظیم سرور aiohttp برای health check و webhook
 async def health_check(request):
+    memory = psutil.virtual_memory()
+    queue_size = request_queue.qsize()
+    return web.Response(text=f"OK - Queue: {queue_size}, Free Memory: {memory.available / (1024 * 1024):.2f} MB")
+
+async def webhook(request):
+    application = request.app['application']
+    update = Update.de_json(await request.json(), application.bot)
+    await application.process_update(update)
     return web.Response(text="OK")
 
 async def run_bot(application):
-    # حذف Webhook قبل از شروع Polling
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    logger.info("Webhook با موفقیت حذف شد")
-
     # اضافه کردن هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping))
@@ -795,21 +877,14 @@ async def run_bot(application):
     # شروع پردازش صف
     asyncio.create_task(process_queue())
 
-    # اجرای Polling
+    # اجرای ربات
     await application.initialize()
     logger.info("Application initialized")
     await application.start()
     logger.info("Application started")
-    await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-    logger.info("Polling started")
-
-    # نگه داشتن برنامه در حال اجرا
-    while True:
-        await asyncio.sleep(3600)  # خوابیدن به مدت 1 ساعت برای جلوگیری از خروج
 
 async def shutdown(application, runner):
     logger.info("در حال متوقف کردن ربات...")
-    await application.updater.stop()
     await application.stop()
     await application.shutdown()
     await runner.cleanup()
@@ -821,19 +896,26 @@ async def setup_and_run():
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
 
     init_db()
-    # تنظیم تایم‌اوت بزرگ‌تر برای درخواست‌ها
-    application = Application.builder().token(BOT_TOKEN).read_timeout(20).write_timeout(20).connect_timeout(20).build()
+    # تنظیم Application با تایم‌اوت ۲۰ دقیقه
+    application = Application.builder().token(BOT_TOKEN).read_timeout(1200).write_timeout(1200).connect_timeout(1200).build()
 
     # تنظیم سرور aiohttp
     app = web.Application()
+    app['application'] = application
     app.router.add_get('/', health_check)
+    app.router.add_post('/webhook', webhook)
+
+    # تنظیم Webhook
+    webhook_url = "https://your-koyeb-app.koyeb.app/webhook"  # جایگزین با URL واقعی Koyeb
+    await application.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook تنظیم شد: {webhook_url}")
 
     # اجرای aiohttp
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
-    logger.info("سرور aiohttp برای health check روی پورت 8080 شروع شد")
+    logger.info("سرور aiohttp برای health check و webhook روی پورت ۸۰۸۰ شروع شد")
 
     # اجرای ربات
     await run_bot(application)
@@ -855,5 +937,3 @@ if __name__ == "__main__":
         loop.run_until_complete(shutdown(application, runner))
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
-
-# توضیحات: این تابع shutdown توی بخش `if __name__ == "__main__":` استفاده شده تا در صورت وقفه یا خطا، ربات به صورت تمیز خاموش بشه.
