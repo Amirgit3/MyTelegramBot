@@ -277,7 +277,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["cancel"] = False
-    with temp_directory(user_id) as temp_dir:  # فقط اینجا دایرکتوری موقت رو اضافه می‌کنیم
+    with temp_directory(user_id) as temp_dir:
         processing_msg = await update.message.reply_text(
             LANGUAGES[lang]["in_queue"],
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("لغو", callback_data=f"cancel_{url}")]])
@@ -372,101 +372,103 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await settings(update, context)
         return
 
-    if not check_user_limit(user_id):
-        await query.message.reply_text(LANGUAGES[lang]["limit_reached"])
-        return
+    # فقط برای پردازش درخواست‌های دانلود (yt یا ig) دایرکتوری موقت رو فراخوانی کن
+    if data[0] in ["yt", "ig"]:
+        if not check_user_limit(user_id):
+            await query.message.reply_text(LANGUAGES[lang]["limit_reached"])
+            return
 
-    url = data[1]
-    with temp_directory(user_id) as temp_dir:  # فقط اینجا دایرکتوری موقت رو اضافه می‌کنیم
-        processing_msg = await query.message.reply_text(LANGUAGES[lang]["processing"])
+        url = data[1]
+        with temp_directory(user_id) as temp_dir:
+            processing_msg = await query.message.reply_text(LANGUAGES[lang]["processing"])
 
-        try:
-            if not check_ffmpeg():
-                await processing_msg.edit_text(LANGUAGES[lang]["error"].format("FFmpeg نصب نشده است."))
-                return
+            try:
+                if not check_ffmpeg():
+                    await processing_msg.edit_text(LANGUAGES[lang]["error"].format("FFmpeg نصب نشده است."))
+                    return
 
-            if data[0] == "yt":
-                if data[2] == "desc":
-                    description = context.user_data.get("yt_description", LANGUAGES[lang]["no_subtitle"])
-                    await processing_msg.edit_text(f"توضیحات ویدئو:\n{description}")
-                elif data[2] == "audio":
-                    audio_format = data[3]
-                    ydl_opts = {"format": "bestaudio", "outtmpl": f"{temp_dir}/audio.%(ext)s", "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": audio_format}], "quiet": True}
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    file_path = f"{temp_dir}/audio.{audio_format}"
-                    file_size = os.path.getsize(file_path)
-                    if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
-                        return
-                    update_user_limit(user_id, file_size)
-                    await query.message.reply_audio(audio=open(file_path, "rb"))
-                elif data[2] == "sub":
-                    sub_lang = data[3]
-                    ydl_opts = {"writesubtitles": True, "subtitleslangs": [sub_lang], "outtmpl": f"{temp_dir}/subtitle.%(ext)s", "quiet": True}
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    subtitle_file = f"{temp_dir}/subtitle.{sub_lang}.vtt"
-                    if os.path.exists(subtitle_file):
-                        file_size = os.path.getsize(subtitle_file)
+                if data[0] == "yt":
+                    if data[2] == "desc":
+                        description = context.user_data.get("yt_description", LANGUAGES[lang]["no_subtitle"])
+                        await processing_msg.edit_text(f"توضیحات ویدئو:\n{description}")
+                    elif data[2] == "audio":
+                        audio_format = data[3]
+                        ydl_opts = {"format": "bestaudio", "outtmpl": f"{temp_dir}/audio.%(ext)s", "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": audio_format}], "quiet": True}
+                        await download_with_yt_dlp(url, ydl_opts, context, query, lang)
+                        file_path = f"{temp_dir}/audio.{audio_format}"
+                        file_size = os.path.getsize(file_path)
                         if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
                             await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
                             return
                         update_user_limit(user_id, file_size)
-                        await query.message.reply_document(document=open(subtitle_file, "rb"))
-                    else:
-                        await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
-                else:
-                    format_id = data[2]
-                    ydl_opts = {"format": format_id, "outtmpl": f"{temp_dir}/video.%(ext)s", "quiet": True}
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    input_file = f"{temp_dir}/video.mp4" if os.path.exists(f"{temp_dir}/video.mp4") else f"{temp_dir}/video.webm"
-                    file_size = os.path.getsize(input_file)
-                    if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["file_too_large" if file_size > 500 * 1024 * 1024 else "limit_reached"])
-                        return
-                    update_user_limit(user_id, file_size)
-                    if file_size > 49 * 1024 * 1024:
-                        output_template = f"{temp_dir}/part_%03d.mp4"
-                        subprocess.run(["ffmpeg", "-i", input_file, "-c", "copy", "-f", "segment", "-segment_time", "60", "-segment_size", "49000000", output_template], check=True)
-                        for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
-                            part_path = os.path.join(temp_dir, part_file)
-                            await query.message.reply_video(video=open(part_path, "rb"))
-                            await asyncio.sleep(1)
-                    else:
-                        await query.message.reply_video(video=open(input_file, "rb"))
-
-            elif data[0] == "ig":
-                if data[2] == "caption":
-                    caption = context.user_data.get("ig_caption", LANGUAGES[lang]["no_subtitle"])
-                    await processing_msg.edit_text(f"کپشن:\n{caption}")
-                else:
-                    media_type = data[2]
-                    ydl_opts = {"outtmpl": f"{temp_dir}/media.%(ext)s", "quiet": True, "username": INSTAGRAM_USERNAME, "password": INSTAGRAM_PASSWORD}
-                    await download_with_yt_dlp(url, ydl_opts, context, query, lang)
-                    file_path = f"{temp_dir}/media.{media_type}"
-                    file_size = os.path.getsize(file_path)
-                    if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
-                        await processing_msg.edit_text(LANGUAGES[lang]["file_too_large" if file_size > 500 * 1024 * 1024 else "limit_reached"])
-                        return
-                    update_user_limit(user_id, file_size)
-                    if file_size > 49 * 1024 * 1024:
-                        output_template = f"{temp_dir}/part_%03d.mp4"
-                        subprocess.run(["ffmpeg", "-i", file_path, "-c", "copy", "-f", "segment", "-segment_time", "60", "-segment_size", "49000000", output_template], check=True)
-                        for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
-                            part_path = os.path.join(temp_dir, part_file)
-                            if media_type in ["jpg", "jpeg", "png"]:
-                                await query.message.reply_photo(photo=open(part_path, "rb"))
-                            else:
-                                await query.message.reply_video(video=open(part_path, "rb"))
-                            await asyncio.sleep(1)
-                    else:
-                        if media_type in ["jpg", "jpeg", "png"]:
-                            await query.message.reply_photo(photo=open(file_path, "rb"))
+                        await query.message.reply_audio(audio=open(file_path, "rb"))
+                    elif data[2] == "sub":
+                        sub_lang = data[3]
+                        ydl_opts = {"writesubtitles": True, "subtitleslangs": [sub_lang], "outtmpl": f"{temp_dir}/subtitle.%(ext)s", "quiet": True}
+                        await download_with_yt_dlp(url, ydl_opts, context, query, lang)
+                        subtitle_file = f"{temp_dir}/subtitle.{sub_lang}.vtt"
+                        if os.path.exists(subtitle_file):
+                            file_size = os.path.getsize(subtitle_file)
+                            if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
+                                await processing_msg.edit_text(LANGUAGES[lang]["limit_reached"])
+                                return
+                            update_user_limit(user_id, file_size)
+                            await query.message.reply_document(document=open(subtitle_file, "rb"))
                         else:
-                            await query.message.reply_video(video=open(file_path, "rb"))
+                            await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
+                    else:
+                        format_id = data[2]
+                        ydl_opts = {"format": format_id, "outtmpl": f"{temp_dir}/video.%(ext)s", "quiet": True}
+                        await download_with_yt_dlp(url, ydl_opts, context, query, lang)
+                        input_file = f"{temp_dir}/video.mp4" if os.path.exists(f"{temp_dir}/video.mp4") else f"{temp_dir}/video.webm"
+                        file_size = os.path.getsize(input_file)
+                        if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
+                            await processing_msg.edit_text(LANGUAGES[lang]["file_too_large" if file_size > 500 * 1024 * 1024 else "limit_reached"])
+                            return
+                        update_user_limit(user_id, file_size)
+                        if file_size > 49 * 1024 * 1024:
+                            output_template = f"{temp_dir}/part_%03d.mp4"
+                            subprocess.run(["ffmpeg", "-i", input_file, "-c", "copy", "-f", "segment", "-segment_time", "60", "-segment_size", "49000000", output_template], check=True)
+                            for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
+                                part_path = os.path.join(temp_dir, part_file)
+                                await query.message.reply_video(video=open(part_path, "rb"))
+                                await asyncio.sleep(1)
+                        else:
+                            await query.message.reply_video(video=open(input_file, "rb"))
 
-        except Exception as e:
-            await processing_msg.edit_text(LANGUAGES[lang]["error"].format(str(e)))
-            logger.error(f"خطا در پردازش دکمه: {str(e)}")
+                elif data[0] == "ig":
+                    if data[2] == "caption":
+                        caption = context.user_data.get("ig_caption", LANGUAGES[lang]["no_subtitle"])
+                        await processing_msg.edit_text(f"کپشن:\n{caption}")
+                    else:
+                        media_type = data[2]
+                        ydl_opts = {"outtmpl": f"{temp_dir}/media.%(ext)s", "quiet": True, "username": INSTAGRAM_USERNAME, "password": INSTAGRAM_PASSWORD}
+                        await download_with_yt_dlp(url, ydl_opts, context, query, lang)
+                        file_path = f"{temp_dir}/media.{media_type}"
+                        file_size = os.path.getsize(file_path)
+                        if file_size > 500 * 1024 * 1024 or not check_user_limit(user_id, file_size):
+                            await processing_msg.edit_text(LANGUAGES[lang]["file_too_large" if file_size > 500 * 1024 * 1024 else "limit_reached"])
+                            return
+                        update_user_limit(user_id, file_size)
+                        if file_size > 49 * 1024 * 1024:
+                            output_template = f"{temp_dir}/part_%03d.mp4"
+                            subprocess.run(["ffmpeg", "-i", file_path, "-c", "copy", "-f", "segment", "-segment_time", "60", "-segment_size", "49000000", output_template], check=True)
+                            for part_file in sorted([f for f in os.listdir(temp_dir) if f.startswith("part_")]):
+                                part_path = os.path.join(temp_dir, part_file)
+                                if media_type in ["jpg", "jpeg", "png"]:
+                                    await query.message.reply_photo(photo=open(part_path, "rb"))
+                                else:
+                                    await query.message.reply_video(video=open(part_path, "rb"))
+                                await asyncio.sleep(1)
+                        else:
+                            if media_type in ["jpg", "jpeg", "png"]:
+                                await query.message.reply_photo(photo=open(file_path, "rb"))
+                            else:
+                                await query.message.reply_video(video=open(file_path, "rb"))
+
+            except Exception as e:
+                await processing_msg.edit_text(LANGUAGES[lang]["error"].format(str(e)))
+                logger.error(f"خطا در پردازش دکمه: {str(e)}")
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
