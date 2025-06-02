@@ -307,7 +307,14 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
 
 # پردازش صف درخواست‌ها
 async def process_queue():
-яви: 1. **توقف ربات**:
+    while True:
+        try:
+            update, context, url, processing_msg = await request_queue.get()
+            await handle_request(update, context, url, processing_msg)
+            request_queue.task_done()
+        except Exception as e:
+            logger.error(f"خطا در پردازش صف: {str(e)}")
+            await asyncio.sleep(5)  # تاخیر در صورت خطا برای جلوگیری از ل
 
 ### کد کامل اصلاح‌شده
 ```python
