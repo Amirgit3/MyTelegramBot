@@ -909,7 +909,7 @@ async def setup_and_run():
     app.router.add_post('/webhook', webhook)
 
     # تنظیم Webhook
-    webhook_url = "https://your-koyeb-app.koyeb.app/webhook"  # جایگزین با URL واقعی Koyeb
+    webhook_url = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app/webhook"  # جایگزین با URL واقعی Koyeb
     try:
         await application.bot.set_webhook(url=webhook_url)
         logger.info(f"Webhook تنظیم شد: {webhook_url}")
