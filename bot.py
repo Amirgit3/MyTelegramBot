@@ -6,7 +6,7 @@ import asyncio
 import psutil
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
-from telegram.error import TelegramError, BadRequest
+from telegram.error import TelegramError
 import yt_dlp
 from datetime import datetime
 import re
@@ -454,6 +454,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             bot_member2 = await context.bot.get_chat_member("@music_bik", bot_id)
             if bot_member1.status not in ["administrator", "creator"] or bot_member2.status not in ["administrator", "creator"]:
                 await query.message.reply_text("ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.")
+                logger.error(f"ربات در کانال‌ها ادمین نیست. وضعیت کانال ۱: {bot_member1.status}, کانال ۲: {bot_member2.status}")
                 return
         except TelegramError as e:
             logger.error(f"ربات نمی‌تواند وضعیت خودش را در کانال‌ها چک کند: {str(e)}")
@@ -468,8 +469,10 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
                chat_member2.status in ["member", "administrator", "creator"]:
                 context.user_data["is_member"] = True
                 await query.message.reply_text(LANGUAGES[lang]["membership_ok"])
+                logger.info(f"عضویت کاربر {user_id} تأیید شد")
             else:
                 await query.message.reply_text(LANGUAGES[lang]["join_channels"])
+                logger.warning(f"کاربر {user_id} در هر دو کانال عضو نیست")
         except TelegramError as e:
             logger.error(f"خطا در بررسی عضویت کاربر {user_id}: {str(e)}")
             await query.message.reply_text(LANGUAGES[lang]["error"].format("نمی‌توان عضویت را چک کرد. لطفاً دوباره امتحان کنید."))
@@ -907,8 +910,13 @@ async def setup_and_run():
 
     # تنظیم Webhook
     webhook_url = "https://your-koyeb-app.koyeb.app/webhook"  # جایگزین با URL واقعی Koyeb
-    await application.bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook تنظیم شد: {webhook_url}")
+    try:
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook تنظیم شد: {webhook_url}")
+    except TelegramError as e:
+        logger.error(f"خطا در تنظیم Webhook: {str(e)}. به حالت Polling سوئیچ می‌شود.")
+        await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        logger.info("Polling started")
 
     # اجرای aiohttp
     runner = web.AppRunner(app)
