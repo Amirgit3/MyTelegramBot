@@ -8,7 +8,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InlineQ
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 from telegram.error import TelegramError
 import yt_dlp
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import tempfile
 import shutil
@@ -88,7 +88,6 @@ LANGUAGES = {
         "bot_not_admin": "ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.",
         "membership_check_failed": "نمی‌توان عضویت را چک کرد. لطفاً دوباره امتحان کنید."
     }
-    # سایر زبان‌ها برای کوتاه شدن حذف شدند
 }
 
 # بررسی نصب FFmpeg
@@ -108,8 +107,25 @@ def temp_directory(user_id):
     try:
         yield temp_dir
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        logger.info(f"پوشه موقت کاربر {user_id} پاک شد: {temp_dir}")
+        # حذف پوشه به توابع process_youtube و process_instagram منتقل شده
+        pass
+
+# پاک‌سازی دوره‌ای پوشه‌های موقت قدیمی
+async def clean_temp_directories():
+    while True:
+        current_time = datetime.now()
+        temp_dir_prefix = tempfile.gettempdir() + "/user_"
+        for folder in os.listdir(tempfile.gettempdir()):
+            if folder.startswith("user_"):
+                folder_path = os.path.join(tempfile.gettempdir(), folder)
+                try:
+                    creation_time = datetime.fromtimestamp(os.path.getctime(folder_path))
+                    if current_time - creation_time > timedelta(hours=1):
+                        shutil.rmtree(folder_path, ignore_errors=True)
+                        logger.info(f"پوشه موقت قدیمی حذف شد: {folder_path}")
+                except Exception as e:
+                    logger.error(f"خطا در پاک‌سازی پوشه {folder_path}: {str(e)}")
+        await asyncio.sleep(3600)  # بررسی هر یک ساعت
 
 # تنظیم دیتابیس SQLite
 def init_db():
@@ -304,9 +320,9 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get("language", "fa")
 
     logger.info(f"شروع بررسی عضویت برای کاربر {user_id}")
-    await query.message.reply_text(LANGUAGES[lang]["checking_membership"])
-
     try:
+        await query.message.reply_text(LANGUAGES[lang]["checking_membership"])
+
         # چک کردن وضعیت ربات در کانال‌ها
         bot_id = (await context.bot.get_me()).id
         try:
@@ -340,7 +356,7 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(LANGUAGES[lang]["membership_check_failed"])
 
     except Exception as e:
-        logger.error(f"خطای کلی در check_membership برای کاربر {user_id}: {str(e)}")
+        logger.error(f"خطای کلی در بررسی عضویت برای کاربر {user_id}: {str(e)}")
         await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -379,6 +395,7 @@ async def process_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
     user_id = str(update.effective_user.id)
 
     with temp_directory(user_id) as temp_dir:
+        success = False
         try:
             ydl_opts = {"quiet": True, "outtmpl": f"{temp_dir}/%(id)s.%(ext)s"}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -411,6 +428,7 @@ async def process_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
             reply_markup = InlineKeyboardMarkup(keyboard)
             await processing_msg.edit_text(LANGUAGES[lang]["choose_option"], reply_markup=reply_markup)
             logger.info(f"کاربر {user_id} لینک یوتیوب را پردازش کرد: {url}")
+            success = True
         except yt_dlp.DownloadError as e:
             error_msg = "لینک خصوصی است یا دسترسی محدود دارد."
             if "403" in str(e):
@@ -420,12 +438,19 @@ async def process_youtube(update: Update, context: ContextTypes.DEFAULT_TYPE, ur
         except Exception as e:
             await processing_msg.edit_text(LANGUAGES[lang]["error"].format(str(e)))
             logger.error(f"خطای غیرمنتظره برای کاربر {user_id}: {str(e)}")
+        finally:
+            if success:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"پوشه موقت کاربر {user_id} پس از موفقیت پاک شد: {temp_dir}")
+            else:
+                logger.info(f"پوشه موقت کاربر {user_id} به دلیل خطا نگه داشته شد: {temp_dir}")
 
 async def process_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, url, processing_msg):
     lang = context.user_data.get("language", "fa")
     user_id = str(update.effective_user.id)
 
     with temp_directory(user_id) as temp_dir:
+        success = False
         try:
             ydl_opts = {
                 "outtmpl": f"{temp_dir}/media.%(ext)s",
@@ -456,6 +481,7 @@ async def process_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             reply_markup = InlineKeyboardMarkup(keyboard)
             await processing_msg.edit_text(LANGUAGES[lang]["choose_option"], reply_markup=reply_markup)
             logger.info(f"کاربر {user_id} لینک اینستاگرام را پردازش کرد: {url}")
+            success = True
         except yt_dlp.DownloadError as e:
             error_msg = "لینک خصوصی است یا دسترسی محدود دارد."
             if "403" in str(e):
@@ -465,6 +491,12 @@ async def process_instagram(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         except Exception as e:
             await processing_msg.edit_text(LANGUAGES[lang]["error"].format(str(e)))
             logger.error(f"خطای غیرمنتظره برای کاربر {user_id}: {str(e)}")
+        finally:
+            if success:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"پوشه موقت کاربر {user_id} پس از موفقیت پاک شد: {temp_dir}")
+            else:
+                logger.info(f"پوشه موقت کاربر {user_id} به دلیل خطا نگه داشته شد: {temp_dir}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -510,6 +542,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     processing_msg = await query.message.reply_text(LANGUAGES[lang]["processing"])
 
     with temp_directory(user_id) as temp_dir:
+        success = False
         try:
             if not check_ffmpeg():
                 await processing_msg.edit_text(LANGUAGES[lang]["error"].format("FFmpeg نصب نشده است."))
@@ -520,6 +553,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     description = context.user_data.get("yt_description", LANGUAGES[lang]["no_subtitle"])
                     await processing_msg.edit_text(f"توضیحات ویدئو:\n{description}")
                     logger.info(f"کاربر {user_id} توضیحات یوتیوب را درخواست کرد")
+                    success = True
                 elif data[2] == "audio":
                     audio_format = data[3]
                     ydl_opts = {
@@ -538,6 +572,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         update_user_limit(user_id, file_size)
                         await query.message.reply_audio(audio=open(file_path, "rb"))
                         logger.info(f"کاربر {user_id} صوت یوتیوب ({audio_format}) را دانلود کرد")
+                        success = True
                 elif data[2] == "sub":
                     sub_lang = data[3]
                     ydl_opts = {
@@ -553,6 +588,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             update_user_limit(user_id, file_size)
                             await query.message.reply_document(document=open(subtitle_file, "rb"))
                             logger.info(f"کاربر {user_id} زیرنویس ({sub_lang}) را دانلود کرد")
+                            success = True
                         else:
                             await processing_msg.edit_text(LANGUAGES[lang]["no_subtitle"])
                             logger.warning(f"زیرنویس برای کاربر {user_id} در دسترس نیست")
@@ -591,12 +627,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         else:
                             await query.message.reply_video(video=open(input_file, "rb"))
                             logger.info(f"کاربر {user_id} ویدئوی یوتیوب را دانلود کرد")
+                        success = True
 
             elif data[0] == "ig":
                 if data[2] == "caption":
                     caption = context.user_data.get("ig_caption", LANGUAGES[lang]["no_subtitle"])
                     await processing_msg.edit_text(f"کپشن:\n{caption}")
                     logger.info(f"کاربر {user_id} کپشن اینستاگرام را درخواست کرد")
+                    success = True
                 else:
                     media_type = data[2]
                     ydl_opts = {
@@ -639,6 +677,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             else:
                                 await query.message.reply_video(video=open(file_path, "rb"))
                             logger.info(f"کاربر {user_id} مدیای اینستاگرام را دانلود کرد")
+                        success = True
 
         except yt_dlp.DownloadError as e:
             error_msg = "لینک خصوصی است یا دسترسی محدود دارد."
@@ -652,6 +691,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await processing_msg.edit_text(LANGUAGES[lang]["error"].format(str(e)))
             logger.error(f"خطای غیرمنتظره برای کاربر {user_id}: {str(e)}")
+        finally:
+            if success:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                logger.info(f"پوشه موقت کاربر {user_id} پس از موفقیت پاک شد: {temp_dir}")
+            else:
+                logger.info(f"پوشه موقت کاربر {user_id} به دلیل خطا نگه داشته شد: {temp_dir}")
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
@@ -688,7 +733,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.inline_query.answer(results)
             logger.info(f"کاربر {user_id} بدون عضویت درخواست inline کرد")
             return
-    except Exception as e:
+    except TelegramError as e:
         logger.error(f"خطا در بررسی عضویت برای inline query: {str(e)}")
         return
 
@@ -737,6 +782,7 @@ async def run_bot(application):
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(InlineQueryHandler(inline_query))
     asyncio.create_task(process_queue())
+    asyncio.create_task(clean_temp_directories())  # شروع پاک‌سازی دوره‌ای
     await application.initialize()
     logger.info("Application initialized")
     await application.start()
@@ -755,7 +801,7 @@ async def setup_and_run():
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
 
     init_db()
-    application = Application.builder().token(BOT_TOKEN).read_timeout(1200).write_timeout(1200).connect_timeout(1200).build()
+    application = Application.builder().token(BOT_TOKEN).read_timeout(1200).write_timeout(1200).connect_timeout(120Republic).build()
     app = web.Application()
     app['application'] = application
     app.router.add_get('/', health_check)
