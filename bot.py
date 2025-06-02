@@ -3,6 +3,7 @@ import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import TelegramError
+from aiohttp import web
 
 # تنظیم لاگ‌گیری برای Koyeb
 logging.basicConfig(
@@ -90,6 +91,10 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"خطای کلی در check_membership برای کاربر {user_id}: {str(e)}")
         await query.message.reply_text(LANGUAGES[lang]["error"].format("خطای ناشناخته رخ داد."))
 
+# تنظیم سرور aiohttp برای health check
+async def health_check(request):
+    return web.Response(text="OK")
+
 async def run_bot():
     if not BOT_TOKEN:
         logger.error("توکن ربات مشخص نشده است.")
@@ -100,6 +105,15 @@ async def run_bot():
     # اضافه کردن هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(check_membership))
+
+    # تنظیم سرور aiohttp
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    logger.info("سرور aiohttp برای health check روی پورت 8080 شروع شد")
 
     # شروع ربات
     await application.initialize()
@@ -113,19 +127,23 @@ async def run_bot():
     while True:
         await asyncio.sleep(3600)
 
+async def shutdown(application, runner):
+    logger.info("در حال متوقف کردن ربات...")
+    await application.updater.stop()
+    await application.stop()
+    await application.shutdown()
+    await runner.cleanup()
+    logger.info("ربات متوقف شد")
+
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(run_bot())
     except KeyboardInterrupt:
-        loop.run_until_complete(application.updater.stop())
-        loop.run_until_complete(application.stop())
-        loop.run_until_complete(application.shutdown())
+        loop.run_until_complete(shutdown(application, runner))
         loop.close()
     except Exception as e:
         logger.error(f"خطای غیرمنتظره: {str(e)}")
-        loop.run_until_complete(application.updater.stop())
-        loop.run_until_complete(application.stop())
-        loop.run_until_complete(application.shutdown())
+        loop.run_until_complete(shutdown(application, runner))
         loop.close()
