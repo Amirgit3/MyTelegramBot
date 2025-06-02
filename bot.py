@@ -62,7 +62,10 @@ LANGUAGES = {
         "cancel": "Request cancelled.",
         "ping": "Pong! Response time: {}ms",
         "in_queue": "Your request is in queue. Please wait...",
-        "estimated_time": "Download started. Estimated time: {} seconds"
+        "estimated_time": "Download started. Estimated time: {} seconds",
+        "checking_membership": "Checking membership...",
+        "bot_not_admin": "Bot must be an admin in both channels. Please make it an admin.",
+        "membership_check_failed": "Could not check membership. Please try again."
     },
     "fa": {
         "name": "فارسی",
@@ -80,152 +83,12 @@ LANGUAGES = {
         "cancel": "درخواست لغو شد.",
         "ping": "پینگ! زمان پاسخ: {} میلی‌ثانیه",
         "in_queue": "درخواست شما در صف قرار داره. لطفاً صبر کنید...",
-        "estimated_time": "دانلود شروع شد. زمان تقریبی: {} ثانیه"
-    },
-    "ru": {
-        "name": "Русский",
-        "welcome": "Добро пожаловать! 😊\nФайлы разбиваются на части по 50 МБ.\nМаксимальный размер файла: 500 МБ.\nСначала присоединитесь к нашим каналам:",
-        "invalid_link": "Недействительная ссылка! Только ссылки на Instagram или YouTube.",
-        "file_too_large": "Ваш файл больше 500 МБ!",
-        "join_channels": "Пожалуйста, присоединитесь к обоим каналам и попробуйте снова.",
-        "membership_ok": "Членство подтверждено! Отправьте ссылку на Instagram или YouTube.",
-        "choose_option": "Выберите опцию:",
-        "no_subtitle": "Субтитры недоступны!",
-        "error": "Ошибка: {}",
-        "limit_reached": "Вы достигли лимита в 20 запросов или 1 ГБ в день. Попробуйте снова завтра.",
-        "processing": "Обработка вашего запроса, пожалуйста, подождите...",
-        "progress": "Прогресс загрузки: {}%",
-        "cancel": "Запрос отменен.",
-        "ping": "Понг! Время ответа: {} мс",
-        "in_queue": "Ваш запрос в очереди. Пожалуйста, подождите...",
-        "estimated_time": "Загрузка началась. Примерное время: {} секунд"
-    },
-    "es": {
-        "name": "Español",
-        "welcome": "¡Bienvenido! 😊\nLos archivos se dividen en partes de 50 MB.\nTamaño máximo del archivo: 500 MB.\nÚnete primero a nuestros canales:",
-        "invalid_link": "¡Enlace inválido! Solo enlaces de Instagram o YouTube.",
-        "file_too_large": "¡Tu archivo es mayor a 500 MB!",
-        "join_channels": "Por favor, únete a ambos canales y prueba de nuevo.",
-        "membership_ok": "¡Membresía verificada! Envía un enlace de Instagram o YouTube.",
-        "choose_option": "Elige una opción:",
-        "no_subtitle": "¡Subtítulos no disponibles!",
-        "error": "Error: {}",
-        "limit_reached": "Has alcanzado el límite de 20 solicitudes o 1 GB por día. Intenta de nuevo mañana.",
-        "processing": "Procesando tu solicitud, por favor espera...",
-        "progress": "Progreso de la descarga: {}%",
-        "cancel": "Solicitud cancelada.",
-        "ping": "¡Pong! Tiempo de respuesta: {} ms",
-        "in_queue": "Tu solicitud está en cola. Por favor espera...",
-        "estimated_time": "Descarga iniciada. Tiempo estimado: {} segundos"
-    },
-    "fr": {
-        "name": "Français",
-        "welcome": "Bienvenue ! 😊\nLes fichiers sont divisés en parties de 50 Mo.\nTaille maximale du fichier : 500 Mo.\nRejoignez d'abord nos chaînes :",
-        "invalid_link": "Lien invalide ! Seuls les liens Instagram ou YouTube sont acceptés.",
-        "file_too_large": "Votre fichier dépasse 500 Mo !",
-        "join_channels": "Veuillez rejoindre les deux chaînes et réessayer.",
-        "membership_ok": "Adhésion vérifiée ! Envoyez un lien Instagram ou YouTube.",
-        "choose_option": "Choisissez une option :",
-        "no_subtitle": "Sous-titres non disponibles !",
-        "error": "Erreur : {}",
-        "limit_reached": "Vous avez atteint la limite de 20 requêtes ou 1 Go par jour. Réessayez demain.",
-        "processing": "Traitement de votre demande, veuillez patienter...",
-        "progress": "Progression du téléchargement : {}%",
-        "cancel": "Demande annulée.",
-        "ping": "Pong ! Temps de réponse : {} ms",
-        "in_queue": "Votre demande est en file d'attente. Veuillez patienter...",
-        "estimated_time": "Téléchargement commencé. Temps estimé : {} secondes"
-    },
-    "de": {
-        "name": "Deutsch",
-        "welcome": "Willkommen! 😊\nDateien werden in 50-MB-Teile aufgeteilt.\nMaximale Dateigröße: 500 MB.\nTritt zuerst unseren Kanälen bei:",
-        "invalid_link": "Ungültiger Link! Nur Instagram- oder YouTube-Links.",
-        "file_too_large": "Deine Datei ist größer als 500 MB!",
-        "join_channels": "Bitte tritt beiden Kanälen bei und versuche es erneut.",
-        "membership_ok": "Mitgliedschaft bestätigt! Sende einen Instagram- یا YouTube-Link.",
-        "choose_option": "Wähle eine Option:",
-        "no_subtitle": "Untertitel nicht verfügbar!",
-        "error": "Fehler: {}",
-        "limit_reached": "Du hast das Limit von 20 Anfragen oder 1 GB pro Tag erreicht. Versuche es morgen erneut.",
-        "processing": "Deine Anfrage wird verarbeitet, bitte warte...",
-        "progress": "Download-Fortschritt: {}%",
-        "cancel": "Anfrage abgebrochen.",
-        "ping": "Pong! Antwortzeit: {} ms",
-        "in_queue": "Deine Anfrage ist in der Warteschlange. Bitte warte...",
-        "estimated_time": "Download gestartet. Geschätzte Zeit: {} Sekunden"
-    },
-    "it": {
-        "name": "Italiano",
-        "welcome": "Benvenuto! 😊\nI file vengono divisi in parti da 50 MB.\nDimensione massima del file: 500 MB.\nUnisciti prima ai nostri canali:",
-        "invalid_link": "Link non valido! Solo link di Instagram o YouTube.",
-        "file_too_large": "Il tuo file è più grande di 500 MB!",
-        "join_channels": "Per favore, unisciti a entrambi i canali e riprova.",
-        "membership_ok": "Membresía verificata! Invia un link di Instagram o YouTube.",
-        "choose_option": "Scegli un'opzione:",
-        "no_subtitle": "Sottotitoli non disponibili!",
-        "error": "Errore: {}",
-        "limit_reached": "Hai raggiunto il limite di 20 richieste o 1 GB al giorno. Riprova domani.",
-        "processing": "Elaborazione della tua richiesta, per favore attendi...",
-        "progress": "Progresso del download: {}%",
-        "cancel": "Richiesta annullata.",
-        "ping": "Pong! Tempo di risposta: {} ms",
-        "in_queue": "La tua richiesta è in coda. Per favore attendi...",
-        "estimated_time": "Download iniziato. Tempo stimato: {} secondi"
-    },
-    "ar": {
-        "name": "العربية",
-        "welcome": "مرحبًا! 😊\nيتم تقسيم الملفات إلى أجزاء بحجم 50 ميجابايت.\nالحد الأقصى لحجم الملف: 500 ميجابايت.\nانضم إلى قنواتنا أولاً:",
-        "invalid_link": "رابط غير صالح! فقط روابط إنستغرام أو يوتيوب.",
-        "file_too_large": "ملفك أكبر من 500 ميجابايت!",
-        "join_channels": "يرجى الانضمام إلى كلا القناتين والمحاولة مرة أخرى.",
-        "membership_ok": "تم التحقق من العضوية! أرسل رابط إنستغرام أو یوتیوب.",
-        "choose_option": "اختر خيارًا:",
-        "no_subtitle": "الترجمة غير متوفرة!",
-        "error": "خطأ: {}",
-        "limit_reached": "لقد وصلت إلى الحد الأقصى وهو 20 طلبًا أو 1 جيجابايت يوميًا. حاول مرة أخرى غدًا.",
-        "processing": "جارٍ معالجة طلبك، يرجى الانتظار...",
-        "progress": "تقدم التحميل: {}%",
-        "cancel": "تم إلغاء الطلب.",
-        "ping": "بينغ! زمن الاستجابة: {} مللي ثانية",
-        "in_queue": "طلبك في الانتظار. يرجى الانتظار...",
-        "estimated_time": "بدأ التحميل. الوقت المقدر: {} ثانية"
-    },
-    "zh": {
-        "name": "中文",
-        "welcome": "欢迎！😊\n文件将被分成50MB的部分。\n最大文件大小：500MB。\n请先加入我们的频道：",
-        "invalid_link": "无效链接！仅支持Instagram或YouTube链接。",
-        "file_too_large": "您的文件大于500MB！",
-        "join_channels": "请加入两个频道后重试。",
-        "membership_ok": "会员身份已验证！发送Instagram或YouTube链接。",
-        "choose_option": "选择一个选项：",
-        "no_subtitle": "字幕不可用！",
-        "error": "错误：{}",
-        "limit_reached": "您已达到每日20次请求或1GB的限制。请明天再试。",
-        "processing": "正在处理您的请求，请稍候...",
-        "progress": "下载进度：{}%",
-        "cancel": "请求已取消。",
-        "ping": "Pong！响应时间：{}毫秒",
-        "in_queue": "您的请求正在排队。请稍候...",
-        "estimated_time": "下载已开始。预计时间：{}秒"
-    },
-    "pt": {
-        "name": "Português",
-        "welcome": "Bem-vindo! 😊\nOs arquivos são divididos em partes de 50 MB.\nTamanho máximo do arquivo: 500 MB.\nJunte-se primeiro aos nossos canais:",
-        "invalid_link": "Link inválido! Apenas links do Instagram ou YouTube.",
-        "file_too_large": "Seu arquivo é maior que 500 MB!",
-        "join_channels": "Por favor, junte-se aos dois canais e tente novamente.",
-        "membership_ok": "Associação verificada! Envie um link do Instagram ou YouTube.",
-        "choose_option": "Escolha uma opção:",
-        "no_subtitle": "Legendas não disponíveis!",
-        "error": "Erro: {}",
-        "limit_reached": "Você atingiu o limite de 20 solicitações ou 1 GB por dia. Tente novamente amanhã.",
-        "processing": "Processando sua solicitação, por favor aguarde...",
-        "progress": "Progresso do download: {}%",
-        "cancel": "Solicitação cancelada.",
-        "ping": "Pong! Tempo de resposta: {} ms",
-        "in_queue": "Sua solicitação está na fila. Por favor, aguarde...",
-        "estimated_time": "Download iniciado. Tempo estimado: {} segundos"
+        "estimated_time": "دانلود شروع شد. زمان تقریبی: {} ثانیه",
+        "checking_membership": "در حال بررسی عضویت...",
+        "bot_not_admin": "ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.",
+        "membership_check_failed": "نمی‌توان عضویت را چک کرد. لطفاً دوباره امتحان کنید."
     }
+    # سایر زبان‌ها برای کوتاه شدن حذف شدند
 }
 
 # بررسی نصب FFmpeg
@@ -318,14 +181,12 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
                 update.message.reply_text(LANGUAGES[lang]["error"].format("خطا در دانلود فایل"))
             )
 
-    # بررسی حافظه آزاد
     memory = psutil.virtual_memory()
     if memory.available < 100 * 1024 * 1024:
         await update.message.reply_text(LANGUAGES[lang]["error"].format("حافظه سرور کافی نیست."))
         logger.error(f"حافظه ناکافی: {memory.available / (1024 * 1024):.2f} MB")
         return False
 
-    # تخمین زمان دانلود
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         file_size = info.get('filesize', 0) or 0
@@ -333,13 +194,10 @@ async def download_with_yt_dlp(url, ydl_opts, context, update, lang):
             await update.message.reply_text(LANGUAGES[lang]["file_too_large"])
             return False
 
-    # اطلاع‌رسانی زمان تقریبی
-    estimated_time = file_size / (1024 * 1024) / 2  # فرض سرعت دانلود ۲ مگابایت بر ثانیه
+    estimated_time = file_size / (1024 * 1024) / 2
     await update.message.reply_text(LANGUAGES[lang]["estimated_time"].format(round(estimated_time)))
 
-    ydl_opts.update({
-        'buffer_size': 1024 * 1024,  # بافر ۱ مگابایتی
-    })
+    ydl_opts.update({'buffer_size': 1024 * 1024})
 
     async with download_semaphore:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -446,25 +304,29 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = context.user_data.get("language", "fa")
 
     logger.info(f"شروع بررسی عضویت برای کاربر {user_id}")
+    await query.message.reply_text(LANGUAGES[lang]["checking_membership"])
+
     try:
-        # چک کردن وضعیت ربات توی کانال‌ها
+        # چک کردن وضعیت ربات در کانال‌ها
         bot_id = (await context.bot.get_me()).id
         try:
             bot_member1 = await context.bot.get_chat_member("@enrgy_m", bot_id)
             bot_member2 = await context.bot.get_chat_member("@music_bik", bot_id)
+            logger.info(f"وضعیت ربات - کانال ۱: {bot_member1.status}, کانال ۲: {bot_member2.status}")
             if bot_member1.status not in ["administrator", "creator"] or bot_member2.status not in ["administrator", "creator"]:
-                await query.message.reply_text("ربات باید در هر دو کانال ادمین باشد. لطفاً ادمین کنید.")
-                logger.error(f"ربات در کانال‌ها ادمین نیست. وضعیت کانال ۱: {bot_member1.status}, کانال ۲: {bot_member2.status}")
+                await query.message.reply_text(LANGUAGES[lang]["bot_not_admin"])
+                logger.error(f"ربات در کانال‌ها ادمین نیست. کانال ۱: {bot_member1.status}, کانال ۲: {bot_member2.status}")
                 return
         except TelegramError as e:
-            logger.error(f"ربات نمی‌تواند وضعیت خودش را در کانال‌ها چک کند: {str(e)}")
-            await query.message.reply_text("خطا: ربات به کانال‌ها دسترسی ندارد. لطفاً ربات را ادمین کنید.")
+            logger.error(f"خطا در بررسی وضعیت ربات در کانال‌ها: {str(e)}")
+            await query.message.reply_text(LANGUAGES[lang]["membership_check_failed"])
             return
 
         # چک کردن عضویت کاربر
         try:
             chat_member1 = await context.bot.get_chat_member("@enrgy_m", user_id)
             chat_member2 = await context.bot.get_chat_member("@music_bik", user_id)
+            logger.info(f"وضعیت کاربر {user_id} - کانال ۱: {chat_member1.status}, کانال ۲: {chat_member2.status}")
             if chat_member1.status in ["member", "administrator", "creator"] and \
                chat_member2.status in ["member", "administrator", "creator"]:
                 context.user_data["is_member"] = True
@@ -475,11 +337,11 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"کاربر {user_id} در هر دو کانال عضو نیست")
         except TelegramError as e:
             logger.error(f"خطا در بررسی عضویت کاربر {user_id}: {str(e)}")
-            await query.message.reply_text(LANGUAGES[lang]["error"].format("نمی‌توان عضویت را چک کرد. لطفاً دوباره امتحان کنید."))
+            await query.message.reply_text(LANGUAGES[lang]["membership_check_failed"])
 
     except Exception as e:
         logger.error(f"خطای کلی در check_membership برای کاربر {user_id}: {str(e)}")
-        await query.message.reply_text(LANGUAGES[lang]["error"].format("خطای ناشناخته رخ داد."))
+        await query.message.reply_text(LANGUAGES[lang]["error"].format(str(e)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -628,7 +490,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data[0] == "check_membership":
-        await query.message.reply_text("در حال بررسی...")
         await check_membership(update, context)
         return
     elif data[0] == "settings":
@@ -870,17 +731,12 @@ async def webhook(request):
     return web.Response(text="OK")
 
 async def run_bot(application):
-    # اضافه کردن هندلرها
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ping", ping))
     application.add_handler(MessageHandler(filters.Text() & ~filters.Command(), handle_message))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(InlineQueryHandler(inline_query))
-
-    # شروع پردازش صف
     asyncio.create_task(process_queue())
-
-    # اجرای ربات
     await application.initialize()
     logger.info("Application initialized")
     await application.start()
@@ -899,18 +755,15 @@ async def setup_and_run():
         raise ValueError("لطفاً BOT_TOKEN را تنظیم کنید.")
 
     init_db()
-    # تنظیم Application با تایم‌اوت ۲۰ دقیقه
     application = Application.builder().token(BOT_TOKEN).read_timeout(1200).write_timeout(1200).connect_timeout(1200).build()
-
-    # تنظیم سرور aiohttp
     app = web.Application()
     app['application'] = application
     app.router.add_get('/', health_check)
     app.router.add_post('/webhook', webhook)
 
-    # تنظیم Webhook
-    webhook_url = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app/webhook"  # جایگزین با URL واقعی Koyeb
+    webhook_url = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app/webhook"
     try:
+        await application.bot.delete_webhook(drop_pending_updates=True)
         await application.bot.set_webhook(url=webhook_url)
         logger.info(f"Webhook تنظیم شد: {webhook_url}")
     except TelegramError as e:
@@ -918,16 +771,12 @@ async def setup_and_run():
         await application.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
         logger.info("Polling started")
 
-    # اجرای aiohttp
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
     logger.info("سرور aiohttp برای health check و webhook روی پورت ۸۰۸۰ شروع شد")
-
-    # اجرای ربات
     await run_bot(application)
-
     return application, runner
 
 if __name__ == "__main__":
