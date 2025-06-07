@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 # --- Environment Variables (Fetched from Koyeb or OS) ---
 # These values MUST be set as environment variables on Koyeb for your bot to work.
-# For local testing, you can use a .env file and `load_dotenv()` (as in earlier versions).
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
@@ -99,7 +98,7 @@ async def increment_user_download_count(user_id):
 async def is_member(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if a user is a member of a specific channel."""
     if chat_id == 0:
-        return True # This line remains as a safeguard, but with hardcoded IDs, it's less likely to be hit.
+        return True
     try:
         chat_member = await context.bot.get_chat_member(chat_id, user_id)
         return chat_member.status in ["member", "administrator", "creator"]
@@ -111,15 +110,25 @@ async def check_all_memberships(user_id: int, context: ContextTypes.DEFAULT_TYPE
     """Checks if a user is a member of all required channels."""
     is_member_1 = await is_member(user_id, REQUIRED_CHANNEL_ID_1, context)
     is_member_2 = True
-    if REQUIRED_CHANNEL_ID_2 != 0: # Only check if a second channel is explicitly set and not 0
+    if REQUIRED_CHANNEL_ID_2 != 0:
         is_member_2 = await is_member(user_id, REQUIRED_CHANNEL_ID_2, context)
     return is_member_1 and is_member_2
 
-async def get_membership_buttons():
-    """Returns inline keyboard for membership check."""
-    buttons = [
-        [InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership")]
-    ]
+async def get_membership_buttons(is_all_member: bool = False):
+    """Returns inline keyboard for membership check and channel links."""
+    if is_all_member:
+        return None # No buttons if already a member
+
+    buttons = []
+    # Add buttons for each channel
+    if REQUIRED_CHANNEL_ID_1 != 0 and CHANNEL_LINK_1:
+        buttons.append([InlineKeyboardButton("کانال نگرش مثبت ✨", url=CHANNEL_LINK_1)])
+    if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
+        buttons.append([InlineKeyboardButton("کانال Music 🎶", url=CHANNEL_LINK_2)])
+
+    # Add a button to check membership after joining
+    buttons.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership")])
+
     return InlineKeyboardMarkup(buttons)
 
 async def check_membership_and_proceed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,34 +140,24 @@ async def check_membership_and_proceed(update: Update, context: ContextTypes.DEF
 
     is_all_member = await check_all_memberships(user_id, context)
     if is_all_member:
-        message_text = "✅ عضویت شما در کانال‌ها تایید شد! حالا می‌توانید لینک یوتیوب، شورت، ریلز یا IGTV را ارسال کنید."
+        message_text = (
+            "✅ عضویت شما در کانال‌ها تایید شد! 🎉\n\n"
+            "حالا می‌توانید لینک پست‌های **یوتیوب (YouTube)**، **شورت (Shorts)**، **ریلز (Reels)** یا **IGTV اینستاگرام (Instagram IGTV)** را برای من ارسال کنید تا ویدیو یا عکس مربوطه را دریافت کنید."
+        )
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,
             message_id=update.effective_message.message_id,
-            reply_markup=None
+            reply_markup=None # Remove buttons once membership is confirmed
         )
+        await update.effective_message.reply_text(message_text)
     else:
-        channel_links_text = (
-            f"- کانال اول: {CHANNEL_LINK_1}\n"
-        )
-        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
-            channel_links_text += (
-                f"- کانال دوم: {CHANNEL_LINK_2}"
-            )
-        elif REQUIRED_CHANNEL_ID_2 != 0:
-             channel_links_text += (
-                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
-            )
-
-
+        # Re-send the message with channel links and check button
+        await update.callback_query.answer("هنوز عضویت شما تایید نشده است. لطفاً ابتدا در کانال‌ها عضو شوید.")
         message_text = (
             "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            f"{channel_links_text}\n\n"
-            "پس از عضویت، دکمه «✅ بررسی عضویت» را دوباره فشار دهید."
+            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را دوباره فشار دهید."
         )
-
-    await update.callback_query.answer()
-    await update.effective_message.reply_text(message_text, reply_markup=await get_membership_buttons() if not is_all_member else None)
+        await update.effective_message.reply_text(message_text, reply_markup=await get_membership_buttons(False))
 
 
 # --- Command Handlers ---
@@ -170,31 +169,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     is_all_member = await check_all_memberships(user.id, context)
     if is_all_member:
         await update.message.reply_html(
-            rf"سلام {user.mention_html()}! خوش آمدید. 👋",
-            reply_markup=None
-        )
-        await update.message.reply_text(
-            "لطفاً لینک یوتیوب، شورت، ریلز یا IGTV اینستاگرام را برای دانلود ارسال کنید."
+            rf"سلام {user.mention_html()}! خوش آمدید. 👋\n\n"
+            "می‌توانید لینک پست‌های **یوتیوب (YouTube)**، **شورت (Shorts)**، **ریلز (Reels)** یا **IGTV اینستاگرام (Instagram IGTV)** را برای من ارسال کنید تا ویدیو یا عکس مربوطه را دریافت کنید."
         )
     else:
-        channel_links_text = (
-            f"- کانال اول: {CHANNEL_LINK_1}\n"
-        )
-        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
-            channel_links_text += (
-                f"- کانال دوم: {CHANNEL_LINK_2}"
-            )
-        elif REQUIRED_CHANNEL_ID_2 != 0:
-            channel_links_text += (
-                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
-            )
-
-
         await update.message.reply_html(
             rf"سلام {user.mention_html()}! ⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            f"{channel_links_text}\n\n"
-            "پس از عضویت، دکمه «✅ بررسی عضویت» را فشار دهید.",
-            reply_markup=await get_membership_buttons()
+            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را فشار دهید.",
+            reply_markup=await get_membership_buttons(False)
         )
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -205,23 +187,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     is_all_member = await check_all_memberships(user_id, context)
     if not is_all_member:
-        channel_links_text = (
-            f"- کانال اول: {CHANNEL_LINK_1}\n"
-        )
-        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
-            channel_links_text += (
-                f"- کانال دوم: {CHANNEL_LINK_2}"
-            )
-        elif REQUIRED_CHANNEL_ID_2 != 0:
-            channel_links_text += (
-                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
-            )
-
         await update.message.reply_text(
             "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            f"{channel_links_text}\n\n"
-            "پس از عضویت، دکمه «✅ بررسی عضویت» را فشار دهید.",
-            reply_markup=await get_membership_buttons()
+            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را فشار دهید.",
+            reply_markup=await get_membership_buttons(False)
         )
         return
 
@@ -238,6 +207,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     os.makedirs(temp_dir_path, exist_ok=True)
     logger.info(f"پوشه موقت برای کاربر {user_id} ساخته شد: {temp_dir_path}")
 
+    sent_message = None
     try:
         sent_message = await update.message.reply_text("در حال پردازش لینک شما... لطفا صبر کنید.")
         file_path = None
@@ -250,21 +220,40 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             'max_downloads': 1,
             'usenetrc': False,
             'cookiefile': None,
+            'quiet': True, # Suppress stdout messages from yt-dlp
+            'no_warnings': True # Suppress warnings from yt-dlp
         }
 
         # Add Instagram credentials if available
-        if "instagram.com" in user_message and INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-            ydl_opts['username'] = INSTAGRAM_USERNAME
-            ydl_opts['password'] = INSTAGRAM_PASSWORD
-            logger.info("Instagram credentials added to yt-dlp options.")
-        else:
-            if "instagram.com" in user_message:
+        if "instagram.com" in user_message:
+            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+                ydl_opts['username'] = INSTAGRAM_USERNAME
+                ydl_opts['password'] = INSTAGRAM_PASSWORD
+                logger.info("Instagram credentials added to yt-dlp options.")
+            else:
                 logger.warning("Instagram credentials not set as environment variables. Instagram downloads may fail.")
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent_message.message_id,
+                    text="خطا: اطلاعات ورود به اینستاگرام برای ربات تنظیم نشده است. لطفاً با ادمین تماس بگیرید."
+                )
+                return # Exit if no Instagram credentials for Instagram link
 
-
+        info = None
         with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(user_message, download=True)
-            file_path = ydl.prepare_filename(info)
+            # Safely extract info, it might return None if there's an error
+            try:
+                info = ydl.extract_info(user_message, download=True)
+            except Exception as e:
+                logger.error(f"yt-dlp extract_info failed for {user_message}: {e}", exc_info=True)
+                info = None # Ensure info is None on extract error
+
+            if info: # Only proceed if info is not None
+                file_path = ydl.prepare_filename(info)
+            else:
+                # If info is None, it means yt-dlp failed to get video info (e.g., private post, deleted post, login issue)
+                raise ValueError("Could not extract video information. The link might be invalid, private, or require login.")
+
 
         if file_path and os.path.exists(file_path):
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -274,42 +263,56 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=sent_message.message_id,
-                    text="فایل دانلود شد، اما حجم آن بالای 50 مگابایت است. ربات نمی‌تواند فایل‌های با این حجم را ارسال کند."
+                    text="متاسفانه، فایل دانلود شد اما حجم آن (بیش از 50 مگابایت) برای ارسال در تلگرام بسیار زیاد است."
                 )
             else:
                 try:
                     if info.get('ext') in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
                         with open(file_path, 'rb') as video_file:
-                            await context.bot.send_video(chat_id, video_file, caption="فایل ویدیویی شما:")
+                            await context.bot.send_video(chat_id, video_file, caption="ویدیوی شما آماده است! 🎬")
                     elif info.get('ext') in ['jpg', 'jpeg', 'png', 'webp']:
                         with open(file_path, 'rb') as photo_file:
-                            await context.bot.send_photo(chat_id, photo_file, caption="فایل تصویری شما:")
+                            await context.bot.send_photo(chat_id, photo_file, caption="عکس شما آماده است! 📸")
                     else:
                         with open(file_path, 'rb') as doc_file:
-                            await context.bot.send_document(chat_id, doc_file, caption="فایل شما:")
+                            await context.bot.send_document(chat_id, doc_file, caption="فایل شما آماده است! 📄")
 
                     await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
                     await increment_user_download_count(user_id)
+                    await update.message.reply_text(
+                        f"فایل با موفقیت ارسال شد! 🚀 شما امروز {await get_user_download_count(user_id)} از {DAILY_LIMIT} دانلود مجاز را انجام داده‌اید."
+                    )
                 except Exception as e:
                     logger.error(f"Error sending file to Telegram: {e}")
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=sent_message.message_id,
-                        text=f"متاسفانه، در ارسال فایل به تلگرام مشکلی پیش آمد: {e}"
-                    )
+                    if sent_message:
+                        await context.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=sent_message.message_id,
+                            text=f"متاسفانه، در ارسال فایل به تلگرام مشکلی پیش آمد. لطفاً دوباره تلاش کنید. (خطا: {e})"
+                        )
         else:
+            if sent_message:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent_message.message_id,
+                    text="⚠️ متاسفانه، فایلی از این لینک پیدا نشد یا دانلود با مشکل مواجه شد.\nلطفاً از لینک صحیح، عمومی و فعال استفاده کنید و دوباره امتحان کنید."
+                )
+    except ValueError as ve: # Catch our custom ValueError for info being None
+        logger.error(f"Value error processing URL {user_message}: {ve}")
+        if sent_message:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=sent_message.message_id,
-                text="متاسفانه، فایلی از این لینک یافت نشد یا دانلود با مشکل مواجه شد. لطفاً از لینک صحیح و عمومی استفاده کنید."
+                text=f"⚠️ {ve}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
             )
     except Exception as e:
-        logger.error(f"Error processing URL {user_message}: {e}", exc_info=True)
-        await context.bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=sent_message.message_id,
-            text=f"متاسفانه، در پردازش لینک شما مشکلی پیش آمد: {e}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
-        )
+        logger.error(f"General error processing URL {user_message}: {e}", exc_info=True)
+        if sent_message:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text=f"متاسفانه، در پردازش لینک شما مشکلی پیش آمد: {e}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
+            )
     finally:
         if os.path.exists(temp_dir_path):
             for file_name in os.listdir(temp_dir_path):
@@ -338,6 +341,10 @@ async def main() -> None:
     # Crucial check: Ensure BOT_TOKEN is loaded from environment variables
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable is not set. Bot cannot start.")
+        # Attempt to get the bot token from the old hardcoded location if it was left there by mistake
+        # This is a fallback and not recommended for production
+        if hasattr(os.environ, 'BOT_TOKEN'): # Checks if a hardcoded token is in the env but not explicitly fetched by getenv
+             logger.warning("BOT_TOKEN was found in os.environ but not explicitly fetched. Please ensure it's set as a Koyeb environment variable.")
         return # Exit if bot token is missing
 
     global application
