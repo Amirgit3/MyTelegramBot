@@ -1,204 +1,111 @@
 import os
 import logging
-import asyncio
-import aiosqlite
-from datetime import datetime
+from telegram import Update, ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputMediaPhoto,
-    InputMediaVideo,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-)
-from aiohttp import web
-from yt_dlp import YoutubeDL, DownloadError # Removed ExtractorError from here
+# --- Basic Configuration ---
+# Replace with your actual bot token
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# Setup logging
+# Optional: Set your Telegram Channel ID for forced subscription
+# Example: CHANNEL_ID = -1001234567890 (Make sure your bot is an admin in the channel)
+CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+
+# Optional: Set Instagram username and password for older authentication methods if cookies fail.
+# For better security and reliability, cookies are now preferred.
+# INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
+# INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
+
+# Create a temporary directory for downloads
+TEMP_DIR = 'downloads'
+if not os.path.exists(TEMP_DIR):
+    os.makedirs(TEMP_DIR)
+temp_dir_path = os.path.abspath(TEMP_DIR)
+
+# --- Logging Configuration ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
+# set higher logging level for httpx to avoid all GET/POST requests being logged
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# --- Environment Variables (Fetched from Koyeb or OS) ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
-INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
-
-WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app"
-WEBHOOK_PATH = "/telegram"
-PORT = int(os.environ.get("PORT", 8080))
-
-# --- Channel Configuration ---
-REQUIRED_CHANNEL_ID_1 = -1001137065230
-REQUIRED_CHANNEL_ID_2 = -1002284196638
-
-CHANNEL_LINK_1 = "https://t.me/enrgy_m"
-CHANNEL_LINK_2 = "https://t.me/music_bik"
-
-# --- Database Management ---
-DATABASE_NAME = "user_limits.db"
-DAILY_LIMIT = 50
-
-async def init_db():
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        await db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_downloads (
-                user_id INTEGER PRIMARY KEY,
-                download_count INTEGER DEFAULT 0,
-                last_reset_date TEXT
-            )
-            """
-        )
-        await db.commit()
-    logger.info("Database initialized successfully.")
-
-async def get_user_download_count(user_id):
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        cursor = await db.execute("SELECT download_count, last_reset_date FROM user_downloads WHERE user_id = ?", (user_id,))
-        result = await cursor.fetchone()
-
-        today_str = datetime.now().strftime("%Y-%m-%d")
-
-        if result:
-            count, last_reset_date = result
-            if last_reset_date != today_str:
-                await db.execute("UPDATE user_downloads SET download_count = 0, last_reset_date = ? WHERE user_id = ?", (today_str, user_id))
-                await db.commit()
-                return 0
-            return count
-        else:
-            await db.execute("INSERT INTO user_downloads (user_id, download_count, last_reset_date) VALUES (?, ?, ?)", (user_id, 0, today_str))
-            await db.commit()
-            return 0
-
-async def increment_user_download_count(user_id):
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        await db.execute(
-            "INSERT OR REPLACE INTO user_downloads (user_id, download_count, last_reset_date) VALUES (?, COALESCE((SELECT download_count FROM user_downloads WHERE user_id = ? AND last_reset_date = ?), 0) + 1, ?)",
-            (user_id, user_id, today_str, today_str)
-        )
-        await db.commit()
-
 # --- Helper Functions ---
-async def is_member(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Checks if a user is a member of a specific channel."""
-    if chat_id == 0:
-        return True
+
+async def is_member(user_id: int) -> bool:
+    if not CHANNEL_ID:
+        return True  # If no channel is set, all users are considered members
     try:
-        chat_member = await context.bot.get_chat_member(chat_id, user_id)
+        chat_member = await Application.builder().token(TOKEN).build().bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
         return chat_member.status in ["member", "administrator", "creator"]
     except Exception as e:
-        logger.error(f"Error checking membership for user {user_id} in chat {chat_id}: {e}")
+        logger.error(f"Error checking channel membership: {e}")
         return False
 
-async def check_all_memberships(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Checks if a user is a member of all required channels."""
-    is_member_1 = await is_member(user_id, REQUIRED_CHANNEL_ID_1, context)
-    is_member_2 = True
-    if REQUIRED_CHANNEL_ID_2 != 0:
-        is_member_2 = await is_member(user_id, REQUIRED_CHANNEL_ID_2, context)
-    return is_member_1 and is_member_2
-
-async def get_membership_buttons(is_all_member: bool = False):
-    """Returns inline keyboard for membership check and channel links."""
-    if is_all_member:
-        return None
-
-    buttons = []
-    if REQUIRED_CHANNEL_ID_1 != 0 and CHANNEL_LINK_1:
-        buttons.append([InlineKeyboardButton("کانال نگرش مثبت ✨", url=CHANNEL_LINK_1)])
-    if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
-        buttons.append([InlineKeyboardButton("کانال Music 🎶", url=CHANNEL_LINK_2)])
-
-    buttons.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership")])
-
-    return InlineKeyboardMarkup(buttons)
-
-async def check_membership_and_proceed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    username = update.effective_user.username
-    first_name = update.effective_user.first_name
-
-    logger.info(f"کاربر {user_id} ({username}/{first_name}) درخواست بررسی عضویت را کلیک کرد.")
-
-    is_all_member = await check_all_memberships(user_id, context)
-    if is_all_member:
-        message_text = (
-            "✅ عضویت شما در کانال‌ها تایید شد! 🎉\n\n"
-            "حالا می‌توانید لینک پست‌های **یوتیوب (YouTube)**، **شورت (Shorts)**، **ریلز (Reels)** یا **IGTV اینستاگرام (Instagram IGTV)** را برای من ارسال کنید تا ویدیو یا عکس مربوطه را دریافت کنید."
-        )
-        await context.bot.edit_message_reply_markup(
-            chat_id=update.effective_chat.id,
-            message_id=update.effective_message.message_id,
-            reply_markup=None
-        )
-        await update.effective_message.reply_text(message_text)
-    else:
-        await update.callback_query.answer("هنوز عضویت شما تایید نشده است. لطفاً ابتدا در کانال‌ها عضو شوید.")
-        message_text = (
-            "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را دوباره فشار دهید."
-        )
-        await update.effective_message.reply_text(message_text, reply_markup=await get_membership_buttons(False))
-
+def get_subscribe_keyboard():
+    keyboard = [[InlineKeyboardButton("عضویت در کانال", url=f"https://t.me/your_channel_username")]] # Replace 'your_channel_username'
+    return InlineKeyboardMarkup(keyboard)
 
 # --- Command Handlers ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a message on /start with membership check."""
-    user = update.effective_user
-    logger.info(f"کاربر {user.id} ربات را با زبان {user.language_code} شروع کرد")
 
-    is_all_member = await check_all_memberships(user.id, context)
-    if is_all_member:
-        await update.message.reply_html(
-            rf"سلام {user.mention_html()}! خوش آمدید. 👋\n\n"
-            "می‌توانید لینک پست‌های **یوتیوب (YouTube)**، **شورت (Shorts)**، **ریلز (Reels)** یا **IGTV اینستاگرام (Instagram IGTV)** را برای من ارسال کنید تا ویدیو یا عکس مربوطه را دریافت کنید."
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    logger.info(f"User {user.id} started the bot.")
+
+    if not await is_member(user.id):
+        reply_markup = get_subscribe_keyboard()
+        await update.message.reply_text(
+            f"سلام {user.mention_html()}!\n\n"
+            "برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید:",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
         )
-    else:
-        await update.message.reply_html(
-            rf"سلام {user.mention_html()}! ⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را فشار دهید.",
-            reply_markup=await get_membership_buttons(False)
+        return
+
+    await update.message.reply_html(
+        rf"سلام {user.mention_html()}! من یه ربات دانلودر هستم.",
+        reply_markup=ForceReply(selective=True),
+    )
+    await update.message.reply_text(
+        "برای دانلود از یوتیوب و اینستاگرام، فقط کافیه لینک رو برام بفرستی.",
+        parse_mode='Markdown'
+    )
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not await is_member(user.id):
+        reply_markup = get_subscribe_keyboard()
+        await update.message.reply_text(
+            f"سلام {user.mention_html()}!\n\n"
+            "برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید:",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
         )
+        return
+
+    await update.message.reply_text(
+        "من میتونم ویدیوها رو از یوتیوب و اینستاگرام دانلود کنم.\n"
+        "فقط کافیه لینک ویدیو رو برام بفرستی. 😎",
+        parse_mode='Markdown'
+    )
 
 async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles messages containing URLs for download."""
-    user_id = update.effective_user.id
-    user_message = update.message.text
+    user = update.effective_user
     chat_id = update.effective_chat.id
+    user_message = update.message.text
+    logger.info(f"User {user.id} sent a URL: {user_message}")
 
-    is_all_member = await check_all_memberships(user_id, context)
-    if not is_all_member:
+    if not await is_member(user.id):
+        reply_markup = get_subscribe_keyboard()
         await update.message.reply_text(
-            "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
-            "لطفاً با کلیک روی دکمه‌های زیر، وارد کانال‌ها شوید و سپس دکمه «✅ بررسی عضویت» را فشار دهید.",
-            reply_markup=await get_membership_buttons(False)
+            f"سلام {user.mention_html()}!\n\n"
+            "برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید:",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
         )
         return
-
-    # Check daily download limit
-    current_downloads = await get_user_download_count(user_id)
-    if current_downloads >= DAILY_LIMIT:
-        await update.message.reply_text(
-            f"متاسفانه، سهمیه روزانه شما ({DAILY_LIMIT} دانلود) به پایان رسیده است. لطفاً فردا مجدداً تلاش کنید."
-        )
-        return
-
-    # Create a temporary directory for the user
-    temp_dir_path = f"/tmp/user_{user_id}_{os.urandom(4).hex()}"
-    os.makedirs(temp_dir_path, exist_ok=True)
-    logger.info(f"پوشه موقت برای کاربر {user_id} ساخته شد: {temp_dir_path}")
 
     sent_message = None
     try:
@@ -206,185 +113,184 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         file_path = None
         info = None
 
-        # --- First attempt: Try with Instagram credentials (if it's an Instagram link) ---
-        if "instagram.com" in user_message and INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-            logger.info("تلاش اول: دانلود اینستاگرام با اعتبارنامه کاربری.")
-            ydl_opts_with_auth = {
+        # --- First attempt: Try with cookies for Instagram (if it's an Instagram link) ---
+        if "instagram.com" in user_message:
+            logger.info("تلاش اول: دانلود اینستاگرام با کوکی‌ها.")
+            ydl_opts_with_cookies = {
                 'format': 'best',
                 'outtmpl': os.path.join(temp_dir_path, '%(title)s.%(ext)s'),
                 'noplaylist': True,
-                'ignoreerrors': True, # Important for trying public if login fails
                 'max_downloads': 1,
                 'usenetrc': False,
-                'cookiefile': None,
-                'username': INSTAGRAM_USERNAME,
-                'password': INSTAGRAM_PASSWORD,
+                'cookiefile': 'www.instagram.com_cookies.txt', # --- IMPORTANT: Use Instagram cookies file ---
                 'quiet': True,
-                'no_warnings': True
+                'no_warnings': True,
+                'extract_flat': True,
+                # 'username': INSTAGRAM_USERNAME, # Remove these if you're using cookiefile
+                # 'password': INSTAGRAM_PASSWORD, # Remove these if you're using cookiefile
             }
             try:
-                with YoutubeDL(ydl_opts_with_auth) as ydl:
-                    info = ydl.extract_info(user_message, download=False) # Just extract info first
+                with YoutubeDL(ydl_opts_with_cookies) as ydl:
+                    info = ydl.extract_info(user_message, download=False) # Extract info first
                     if info:
-                        # If info is successfully extracted, download it
-                        ydl.download([user_message])
+                        ydl.download([user_message]) # Then download
                         file_path = ydl.prepare_filename(info)
                     else:
-                        # If info is None even with credentials, something is wrong
-                        raise DownloadError("Failed to extract info with credentials.") # Changed ExtractorError to DownloadError or generic Exception
-            except DownloadError as de: # Catch DownloadError
-                logger.warning(f"تلاش با اعتبارنامه اینستاگرام شکست خورد: {de}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
-                info = None # Reset info to None so the second attempt is triggered
-            except Exception as e: # Catch any other generic exceptions
-                logger.warning(f"خطای نامشخص در تلاش با اعتبارنامه اینستاگرام: {e}. (تلاش عمومی انجام می‌شود)")
+                        logger.warning("اطلاعاتی با کوکی‌های اینستاگرام استخراج نشد. تلاش عمومی انجام می‌شود.")
+                        info = None
+            except DownloadError as de:
+                logger.warning(f"خطا در دانلود با کوکی‌های اینستاگرام: {de}. (تلاش عمومی انجام می‌شود)")
+                info = None
+            except Exception as e:
+                logger.warning(f"خطای نامشخص در تلاش با کوکی‌های اینستاگرام: {e}. (تلاش عمومی انجام می‌شود)")
                 info = None
 
-        # --- Second attempt (or first if not Instagram or no credentials): Try without authentication ---
-        if info is None: # Only try public if previous attempt failed or wasn't Instagram
-            logger.info("تلاش دوم: دانلود به صورت عمومی (بدون اعتبارنامه).")
-            ydl_opts_public = {
+        # --- Second attempt (or first if not Instagram): Try without authentication, but with YouTube cookies if applicable ---
+        if info is None:
+            logger.info("تلاش دوم: دانلود به صورت عمومی (بدون اعتبارنامه مستقیم) یا با کوکی‌های یوتیوب.")
+            ydl_opts_public_or_youtube_cookies = {
                 'format': 'best',
                 'outtmpl': os.path.join(temp_dir_path, '%(title)s.%(ext)s'),
                 'noplaylist': True,
-                'ignoreerrors': True, # Allow continuing if some parts fail
                 'max_downloads': 1,
                 'usenetrc': False,
-                'cookiefile': None,
                 'quiet': True,
-                'no_warnings': True
+                'no_warnings': True,
+                'extract_flat': True,
             }
+            if "youtube.com" in user_message or "youtu.be" in user_message:
+                ydl_opts_public_or_youtube_cookies['cookiefile'] = 'www.youtube.com_cookies.txt' # --- IMPORTANT: Use YouTube cookies file ---
+                logger.info("لینک یوتیوب است، از کوکی‌های یوتیوب استفاده می‌شود.")
+
             try:
-                with YoutubeDL(ydl_opts_public) as ydl:
+                with YoutubeDL(ydl_opts_public_or_youtube_cookies) as ydl:
                     info = ydl.extract_info(user_message, download=True)
                     if info:
                         file_path = ydl.prepare_filename(info)
+            except DownloadError as e:
+                logger.error(f"خطا در دانلود عمومی (یا با کوکی‌های یوتیوب) برای لینک {user_message}: {e}", exc_info=True)
+                if "Sign in to confirm you’re not a bot" in str(e) or "Login required" in str(e):
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=sent_message.message_id,
+                        text="⚠️ متاسفانه، یوتیوب برای دانلود این ویدیو نیاز به ورود به حساب کاربری دارد یا شما را به عنوان ربات شناسایی کرده است. لطفاً اطمینان حاصل کنید که کوکی‌های یوتیوب شما در سرور به‌روز هستند یا با یک لینک عمومی‌تر امتحان کنید."
+                    )
+                    return
+                elif "Requested content is not available" in str(e) or "empty media response" in str(e):
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=sent_message.message_id,
+                        text="⚠️ اینستاگرام اجازه دانلود این پست را نمی‌دهد. (ممکن است پست خصوصی باشد یا به دلیل محدودیت‌های امنیتی اینستاگرام باشد). لطفاً اطمینان حاصل کنید که کوکی‌های اینستاگرام شما در سرور به‌روز هستند یا از یک لینک عمومی و فعال استفاده کنید."
+                    )
+                    return
+                info = None
             except Exception as e:
-                logger.error(f"خطا در دانلود عمومی برای لینک {user_message}: {e}", exc_info=True)
-                info = None # Ensure info is None on public attempt error
+                logger.error(f"خطای نامشخص در دانلود عمومی (یا با کوکی‌های یوتیوب) برای لینک {user_message}: {e}", exc_info=True)
+                info = None
 
-        # --- Process downloaded file or report failure ---
-        if file_path and os.path.exists(file_path) and info:
+        if not info:
+            logger.warning(f"Could not extract info for {user_message}. No file to send.")
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text="❌ متاسفانه نتونستم این لینک رو پردازش کنم یا فایلی پیدا کنم. لطفا مطمئن بشید لینک درسته."
+            )
+            return
+
+        if file_path and os.path.exists(file_path):
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-            logger.info(f"فایل دانلود شد: {file_path}, حجم: {file_size_mb:.2f} MB")
+            logger.info(f"File found: {file_path}, size: {file_size_mb:.2f} MB")
 
-            if file_size_mb > 50:
+            if file_size_mb > 50: # Telegram bot API limit is 50MB for general files, 20MB for photos
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=sent_message.message_id,
-                    text="متاسفانه، فایل دانلود شد اما حجم آن (بیش از 50 مگابایت) برای ارسال در تلگرام بسیار زیاد است."
+                    text=f"فایل با حجم {file_size_mb:.2f} مگابایت، متاسفانه بزرگتر از محدودیت تلگرام (50MB) است."
                 )
+                logger.warning(f"File {file_path} is too large ({file_size_mb:.2f} MB).")
             else:
                 try:
-                    if info.get('ext') in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
-                        with open(file_path, 'rb') as video_file:
-                            await context.bot.send_video(chat_id, video_file, caption="ویدیوی شما آماده است! 🎬")
-                    elif info.get('ext') in ['jpg', 'jpeg', 'png', 'webp']:
-                        with open(file_path, 'rb') as photo_file:
-                            await context.bot.send_photo(chat_id, photo_file, caption="عکس شما آماده است! 📸")
-                    else:
-                        with open(file_path, 'rb') as doc_file:
-                            await context.bot.send_document(chat_id, doc_file, caption="فایل شما آماده است! 📄")
-
-                    await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
-                    await increment_user_download_count(user_id)
-                    await update.message.reply_text(
-                        f"فایل با موفقیت ارسال شد! 🚀 شما امروز {await get_user_download_count(user_id)} از {DAILY_LIMIT} دانلود مجاز را انجام داده‌اید."
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=sent_message.message_id,
+                        text="فایل آماده آپلود است. لطفا صبر کنید... 🚀"
                     )
+                    await context.bot.send_document(chat_id=chat_id, document=file_path)
+                    await context.bot.send_message(chat_id=chat_id, text="✅ فایل با موفقیت ارسال شد!")
+                    logger.info(f"Successfully sent {file_path} to user {user.id}.")
                 except Exception as e:
-                    logger.error(f"Error sending file to Telegram: {e}")
-                    if sent_message:
-                        await context.bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=sent_message.message_id,
-                            text=f"متاسفانه، در ارسال فایل به تلگرام مشکلی پیش آمد. لطفاً دوباره تلاش کنید. (خطا: {e})"
-                        )
+                    logger.error(f"Error sending file {file_path}: {e}", exc_info=True)
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=sent_message.message_id,
+                        text="❌ متاسفانه در ارسال فایل به تلگرام مشکلی پیش آمد."
+                    )
+                finally:
+                    # Clean up the downloaded file
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up file: {file_path}")
         else:
-            if sent_message:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=sent_message.message_id,
-                    text="⚠️ متاسفانه، فایلی از این لینک پیدا نشد یا دانلود با مشکل مواجه شد.\nلطفاً از لینک صحیح، عمومی و فعال استفاده کنید و دوباره امتحان کنید."
-                )
-    except Exception as e: # Catch any other unexpected errors
-        logger.error(f"General error processing URL {user_message}: {e}", exc_info=True)
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=sent_message.message_id,
+                text="❌ متاسفانه فایل دانلود نشد یا پیدا نشد. لینک شما ممکن است پشتیبانی نشود یا مشکلی پیش آمده باشد."
+            )
+            logger.warning(f"File not found or downloaded for {user_message}.")
+
+    except Exception as e:
+        logger.error(f"Unhandled error in handle_url for {user_message}: {e}", exc_info=True)
         if sent_message:
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=sent_message.message_id,
-                text=f"متاسفانه، در پردازش لینک شما مشکلی پیش آمد: {e}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
+                text="❌ یک خطای ناشناخته رخ داد. لطفا دوباره تلاش کنید یا با پشتیبانی تماس بگیرید."
             )
+        else:
+            await update.message.reply_text("❌ یک خطای ناشناخته رخ داد. لطفا دوباره تلاش کنید.")
     finally:
-        if os.path.exists(temp_dir_path):
-            for file_name in os.listdir(temp_dir_path):
-                file_path_to_delete = os.path.join(temp_dir_path, file_name)
-                try:
-                    if os.path.isfile(file_path_to_delete):
-                        os.remove(file_path_to_delete)
-                except Exception as e:
-                    logger.error(f"Error deleting file {file_path_to_delete}: {e}")
-            try:
-                os.rmdir(temp_dir_path)
-                logger.info(f"پوشه موقت کاربر {user_id} پاک شد: {temp_dir_path}")
-            except Exception as e:
-                logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
+        # Ensure cleanup in case of partial download or error
+        if 'file_path' in locals() and file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Ensured cleanup of file: {file_path}")
 
-# Health Check function for aiohttp
-async def health_check_route(request):
-    """Simple endpoint for Koyeb Health Check."""
-    return web.Response(text="OK")
 
-async def main() -> None:
-    """Starts the bot."""
-    await init_db()
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # A simple echo for any non-command, non-URL message
+    user = update.effective_user
+    logger.info(f"User {user.id} sent: {update.message.text}")
 
-    if not BOT_TOKEN:
-        logger.error("BOT_TOKEN environment variable is not set. Bot cannot start.")
-        if hasattr(os.environ, 'BOT_TOKEN'):
-             logger.warning("BOT_TOKEN was found in os.environ but not explicitly fetched. Please ensure it's set as a Koyeb environment variable.")
+    if not await is_member(user.id):
+        reply_markup = get_subscribe_keyboard()
+        await update.message.reply_text(
+            f"سلام {user.mention_html()}!\n\n"
+            "برای استفاده از ربات، ابتدا باید در کانال ما عضو شوید:",
+            reply_markup=reply_markup,
+            parse_mode="HTML"
+        )
         return
 
-    global application
-    application = Application.builder().token(BOT_TOKEN).build()
+    await update.message.reply_text(
+        "من فقط می‌تونم لینک‌های یوتیوب و اینستاگرام رو پردازش کنم. 🧐"
+        "لطفا لینک صحیح رو برام بفرست.",
+        parse_mode='Markdown'
+    )
 
-    await application.initialize()
+# --- Main Application Setup ---
+def main() -> None:
+    application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    application.add_handler(CommandHandler("help", help_command))
 
-    app = web.Application()
-    app.router.add_get("/", health_check_route)
+    # Handles URLs (messages that contain 'http://' or 'https://')
+    application.add_handler(MessageHandler(filters.TEXT & (filters.Regex(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+') | filters.Regex(r'www\.(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+')), handle_url))
 
-    async def telegram_webhook_handler(request):
-        update_data = await request.json()
-        update = Update.de_json(update_data, application.bot)
-        await application.process_update(update)
-        return web.Response()
+    # Handles other text messages
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-    app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-
-    try:
-        await application.bot.delete_webhook()
-        logger.info("Webhook با موفقیت حذف شد")
-    except Exception as e:
-        logger.warning(f"Failed to delete webhook (might not be set): {e}")
-
-    webhook_full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-    await application.bot.set_webhook(url=webhook_full_url)
-    logger.info(f"Webhook تنظیم شد: {webhook_full_url}")
-
-    await site.start()
-    logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
-
-    await asyncio.Event().wait()
+    logger.info("Bot started polling...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except Exception as e:
-        logger.error(f"خطای کلی در اجرای ربات: {e}", exc_info=True)
+    main()
 
