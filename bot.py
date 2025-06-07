@@ -19,7 +19,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from aiohttp import web
+from aiohttp import web # aiohttp دیگر برای اجرای سرور استفاده نمی‌شود، فقط برای import web باقی می‌ماند
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
@@ -38,7 +38,6 @@ INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 
 # Use the directly provided Koyeb URL
-# این خط برای رفع مشکل K_SERVICE_URL به صورت مستقیم تنظیم شده است.
 WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app"
 WEBHOOK_PATH = "/telegram"
 PORT = int(os.environ.get("PORT", 8080))
@@ -305,15 +304,11 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
 
-async def health_check(request):
-    """Simple endpoint for Koyeb Health Check."""
-    return web.Response(text="OK")
-
-async def telegram_webhook_handler(request):
-    """Handle incoming Telegram updates from the webhook."""
-    update = Update.de_json(await request.json(), application.bot)
-    await application.process_update(update)
-    return web.Response()
+# This handler is no longer needed as Application.run_webhook handles it
+# async def telegram_webhook_handler(request):
+#     update = Update.de_json(await request.json(), application.bot)
+#     await application.process_update(update)
+#     return web.Response()
 
 async def main() -> None:
     """Starts the bot."""
@@ -328,32 +323,20 @@ async def main() -> None:
     application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 
-    if WEBHOOK_URL:
-        # Remove any existing webhooks
-        await application.bot.delete_webhook()
-        logger.info("Webhook با موفقیت حذف شد") # Added for clarity in logs
+    # This is the crucial change for `RuntimeError: This Application was not initialized`
+    logger.info(f"شروع ربات در حالت Webhook با URL: {WEBHOOK_URL}{WEBHOOK_PATH} و پورت: {PORT}")
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=WEBHOOK_PATH,
+        webhook_url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
+        # Adding health check endpoint for Koyeb
+        on_startup=[init_db], # Call init_db during startup
+        health_check_path="/", # This will handle Koyeb's GET / health check
+        read_timeout=20, # Increase timeout if necessary for slow responses
+        write_timeout=20,
+    )
 
-        # Set new webhook
-        webhook_full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
-        await application.bot.set_webhook(url=webhook_full_url)
-        logger.info(f"Webhook تنظیم شد: {webhook_full_url}")
-
-        # Start aiohttp server for webhook
-        app = web.Application()
-        app.router.add_get("/", health_check) # <--- این خط جدید برای Health Check
-        app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', PORT)
-        await site.start()
-        logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
-
-        # Keep the application running indefinitely
-        await asyncio.Event().wait()
-    else:
-        # This block should ideally not be reached with the fixed WEBHOOK_URL
-        logger.warning("متغیر WEBHOOK_URL تنظیم نشد. ربات در حالت Polling اجرا می‌شود. این حالت برای Koyeb توصیه نمی‌شود.")
-        await application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     try:
