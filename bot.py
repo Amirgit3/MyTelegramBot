@@ -19,7 +19,9 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from aiohttp import web # aiohttp دیگر برای اجرای سرور استفاده نمی‌شود، فقط برای import web باقی می‌ماند
+# aiohttp دیگر برای اجرای سرور استفاده نمی‌شود، فقط برای import web باقی می‌ماند
+# اما چون دیگه ازش استفاده نمیشه، میتونیم حذفش کنیم تا وابستگی کمتری داشته باشیم
+# from aiohttp import web
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
@@ -62,6 +64,7 @@ async def init_db():
             """
         )
         await db.commit()
+    logger.info("Database initialized successfully.") # Add log for clarity
 
 async def get_user_download_count(user_id):
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -304,15 +307,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
 
-# This handler is no longer needed as Application.run_webhook handles it
-# async def telegram_webhook_handler(request):
-#     update = Update.de_json(await request.json(), application.bot)
-#     await application.process_update(update)
-#     return web.Response()
-
 async def main() -> None:
     """Starts the bot."""
-    # Initialize the database
+    # Initialize the database - MOVED HERE to avoid 'on_startup' argument
     await init_db()
 
     global application
@@ -323,20 +320,16 @@ async def main() -> None:
     application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 
-    # This is the crucial change for `RuntimeError: This Application was not initialized`
     logger.info(f"شروع ربات در حالت Webhook با URL: {WEBHOOK_URL}{WEBHOOK_PATH} و پورت: {PORT}")
     await application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=WEBHOOK_PATH,
         webhook_url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
-        # Adding health check endpoint for Koyeb
-        on_startup=[init_db], # Call init_db during startup
         health_check_path="/", # This will handle Koyeb's GET / health check
         read_timeout=20, # Increase timeout if necessary for slow responses
         write_timeout=20,
     )
-
 
 if __name__ == "__main__":
     try:
