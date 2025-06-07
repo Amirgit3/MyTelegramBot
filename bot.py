@@ -19,9 +19,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-# aiohttp دیگر برای اجرای سرور استفاده نمی‌شود، فقط برای import web باقی می‌ماند
-# اما چون دیگه ازش استفاده نمیشه، میتونیم حذفش کنیم تا وابستگی کمتری داشته باشیم
-# from aiohttp import web
+from aiohttp import web # aiohttp را برای Health Check برمی‌گردانیم
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
@@ -307,9 +305,14 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
 
+# تابع Health Check جداگانه برای aiohttp
+async def health_check_route(request):
+    """Simple endpoint for Koyeb Health Check."""
+    return web.Response(text="OK")
+
 async def main() -> None:
     """Starts the bot."""
-    # Initialize the database - MOVED HERE to avoid 'on_startup' argument
+    # Initialize the database
     await init_db()
 
     global application
@@ -320,16 +323,36 @@ async def main() -> None:
     application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 
-    logger.info(f"شروع ربات در حالت Webhook با URL: {WEBHOOK_URL}{WEBHOOK_PATH} و پورت: {PORT}")
-    await application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=WEBHOOK_PATH,
-        webhook_url=f"{WEBHOOK_URL}{WEBHOOK_PATH}",
-        health_check_path="/", # This will handle Koyeb's GET / health check
-        read_timeout=20, # Increase timeout if necessary for slow responses
-        write_timeout=20,
-    )
+    # Initialize the aiohttp web application for handling both webhook and health check
+    app = web.Application()
+    app.router.add_get("/", health_check_route) # Health check route
+
+    # We need to pass the webhook handler for telegram-bot updates
+    async def telegram_webhook_handler(request):
+        update = Update.de_json(await request.json(), application.bot)
+        await application.process_update(update)
+        return web.Response()
+
+    app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler) # Telegram webhook route
+
+    # Run the aiohttp server as part of the application setup
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+
+    # Set webhook with Telegram API
+    await application.bot.delete_webhook()
+    logger.info("Webhook با موفقیت حذف شد")
+    webhook_full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
+    await application.bot.set_webhook(url=webhook_full_url)
+    logger.info(f"Webhook تنظیم شد: {webhook_full_url}")
+
+    # Start the aiohttp server
+    await site.start()
+    logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
+
+    # Keep the application running indefinitely
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
