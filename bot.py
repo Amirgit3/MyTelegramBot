@@ -20,7 +20,7 @@ from telegram.ext import (
     filters,
 )
 from aiohttp import web
-from yt_dlp import YoutubeDL
+from yt_dlp import YoutubeDL, DownloadError, ExtractorError # Import specific yt-dlp exceptions
 
 # Setup logging
 logging.basicConfig(
@@ -29,28 +29,24 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Environment Variables (Fetched from Koyeb or OS) ---
-# These values MUST be set as environment variables on Koyeb for your bot to work.
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 
-WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app" # This is fixed for your Koyeb URL
+WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app"
 WEBHOOK_PATH = "/telegram"
 PORT = int(os.environ.get("PORT", 8080))
 
-# --- Channel Configuration (Directly in code, as they are not sensitive) ---
-# Channel IDs based on the updates you provided.
-# Make sure your bot is an ADMIN in these channels with necessary permissions.
-REQUIRED_CHANNEL_ID_1 = -1001137065230  # "🍀 نگرش مثبت" channel ID
-REQUIRED_CHANNEL_ID_2 = -1002284196638  # "Music 🎶" channel ID
+# --- Channel Configuration ---
+REQUIRED_CHANNEL_ID_1 = -1001137065230
+REQUIRED_CHANNEL_ID_2 = -1002284196638
 
-# Channel Invitation Links (Used in messages to users)
-CHANNEL_LINK_1 = "https://t.me/enrgy_m"   # Link for "🍀 نگرش مثبت"
-CHANNEL_LINK_2 = "https://t.me/music_bik" # Link for "Music 🎶"
+CHANNEL_LINK_1 = "https://t.me/enrgy_m"
+CHANNEL_LINK_2 = "https://t.me/music_bik"
 
 # --- Database Management ---
 DATABASE_NAME = "user_limits.db"
-DAILY_LIMIT = 50  # Max downloads per user per day
+DAILY_LIMIT = 50
 
 async def init_db():
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -117,16 +113,14 @@ async def check_all_memberships(user_id: int, context: ContextTypes.DEFAULT_TYPE
 async def get_membership_buttons(is_all_member: bool = False):
     """Returns inline keyboard for membership check and channel links."""
     if is_all_member:
-        return None # No buttons if already a member
+        return None
 
     buttons = []
-    # Add buttons for each channel
     if REQUIRED_CHANNEL_ID_1 != 0 and CHANNEL_LINK_1:
         buttons.append([InlineKeyboardButton("کانال نگرش مثبت ✨", url=CHANNEL_LINK_1)])
     if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
         buttons.append([InlineKeyboardButton("کانال Music 🎶", url=CHANNEL_LINK_2)])
 
-    # Add a button to check membership after joining
     buttons.append([InlineKeyboardButton("✅ بررسی عضویت", callback_data="check_membership")])
 
     return InlineKeyboardMarkup(buttons)
@@ -147,11 +141,10 @@ async def check_membership_and_proceed(update: Update, context: ContextTypes.DEF
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,
             message_id=update.effective_message.message_id,
-            reply_markup=None # Remove buttons once membership is confirmed
+            reply_markup=None
         )
         await update.effective_message.reply_text(message_text)
     else:
-        # Re-send the message with channel links and check button
         await update.callback_query.answer("هنوز عضویت شما تایید نشده است. لطفاً ابتدا در کانال‌ها عضو شوید.")
         message_text = (
             "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
@@ -211,51 +204,70 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     try:
         sent_message = await update.message.reply_text("در حال پردازش لینک شما... لطفا صبر کنید.")
         file_path = None
-
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': os.path.join(temp_dir_path, '%(title)s.%(ext)s'),
-            'noplaylist': True,
-            'ignoreerrors': True,
-            'max_downloads': 1,
-            'usenetrc': False,
-            'cookiefile': None,
-            'quiet': True, # Suppress stdout messages from yt-dlp
-            'no_warnings': True # Suppress warnings from yt-dlp
-        }
-
-        # Add Instagram credentials if available
-        if "instagram.com" in user_message:
-            if INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
-                ydl_opts['username'] = INSTAGRAM_USERNAME
-                ydl_opts['password'] = INSTAGRAM_PASSWORD
-                logger.info("Instagram credentials added to yt-dlp options.")
-            else:
-                logger.warning("Instagram credentials not set as environment variables. Instagram downloads may fail.")
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=sent_message.message_id,
-                    text="خطا: اطلاعات ورود به اینستاگرام برای ربات تنظیم نشده است. لطفاً با ادمین تماس بگیرید."
-                )
-                return # Exit if no Instagram credentials for Instagram link
-
         info = None
-        with YoutubeDL(ydl_opts) as ydl:
-            # Safely extract info, it might return None if there's an error
+
+        # --- First attempt: Try with Instagram credentials (if it's an Instagram link) ---
+        if "instagram.com" in user_message and INSTAGRAM_USERNAME and INSTAGRAM_PASSWORD:
+            logger.info("تلاش اول: دانلود اینستاگرام با اعتبارنامه کاربری.")
+            ydl_opts_with_auth = {
+                'format': 'best',
+                'outtmpl': os.path.join(temp_dir_path, '%(title)s.%(ext)s'),
+                'noplaylist': True,
+                'ignoreerrors': True, # Important for trying public if login fails
+                'max_downloads': 1,
+                'usenetrc': False,
+                'cookiefile': None,
+                'username': INSTAGRAM_USERNAME,
+                'password': INSTAGRAM_PASSWORD,
+                'quiet': True,
+                'no_warnings': True
+            }
             try:
-                info = ydl.extract_info(user_message, download=True)
+                with YoutubeDL(ydl_opts_with_auth) as ydl:
+                    info = ydl.extract_info(user_message, download=False) # Just extract info first
+                    if info:
+                        # If info is successfully extracted, download it
+                        ydl.download([user_message])
+                        file_path = ydl.prepare_filename(info)
+                    else:
+                        # If info is None even with credentials, something is wrong
+                        raise ExtractorError("Failed to extract info with credentials.")
+            except ExtractorError as ee:
+                logger.warning(f"تلاش با اعتبارنامه اینستاگرام شکست خورد: {ee}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
+                # If login fails, info will be None, so we move to the public attempt
+                info = None # Reset info to None so the second attempt is triggered
+            except DownloadError as de:
+                logger.warning(f"خطا در دانلود با اعتبارنامه اینستاگرام: {de}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
+                info = None
             except Exception as e:
-                logger.error(f"yt-dlp extract_info failed for {user_message}: {e}", exc_info=True)
-                info = None # Ensure info is None on extract error
+                logger.warning(f"خطای نامشخص در تلاش با اعتبارنامه اینستاگرام: {e}. (تلاش عمومی انجام می‌شود)")
+                info = None
 
-            if info: # Only proceed if info is not None
-                file_path = ydl.prepare_filename(info)
-            else:
-                # If info is None, it means yt-dlp failed to get video info (e.g., private post, deleted post, login issue)
-                raise ValueError("Could not extract video information. The link might be invalid, private, or require login.")
+        # --- Second attempt (or first if not Instagram or no credentials): Try without authentication ---
+        if info is None: # Only try public if previous attempt failed or wasn't Instagram
+            logger.info("تلاش دوم: دانلود به صورت عمومی (بدون اعتبارنامه).")
+            ydl_opts_public = {
+                'format': 'best',
+                'outtmpl': os.path.join(temp_dir_path, '%(title)s.%(ext)s'),
+                'noplaylist': True,
+                'ignoreerrors': True, # Allow continuing if some parts fail
+                'max_downloads': 1,
+                'usenetrc': False,
+                'cookiefile': None,
+                'quiet': True,
+                'no_warnings': True
+            }
+            try:
+                with YoutubeDL(ydl_opts_public) as ydl:
+                    info = ydl.extract_info(user_message, download=True)
+                    if info:
+                        file_path = ydl.prepare_filename(info)
+            except Exception as e:
+                logger.error(f"خطا در دانلود عمومی برای لینک {user_message}: {e}", exc_info=True)
+                info = None # Ensure info is None on public attempt error
 
-
-        if file_path and os.path.exists(file_path):
+        # --- Process downloaded file or report failure ---
+        if file_path and os.path.exists(file_path) and info:
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
             logger.info(f"فایل دانلود شد: {file_path}, حجم: {file_size_mb:.2f} MB")
 
@@ -297,15 +309,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                     message_id=sent_message.message_id,
                     text="⚠️ متاسفانه، فایلی از این لینک پیدا نشد یا دانلود با مشکل مواجه شد.\nلطفاً از لینک صحیح، عمومی و فعال استفاده کنید و دوباره امتحان کنید."
                 )
-    except ValueError as ve: # Catch our custom ValueError for info being None
-        logger.error(f"Value error processing URL {user_message}: {ve}")
-        if sent_message:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=sent_message.message_id,
-                text=f"⚠️ {ve}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
-            )
-    except Exception as e:
+    except Exception as e: # Catch any other unexpected errors
         logger.error(f"General error processing URL {user_message}: {e}", exc_info=True)
         if sent_message:
             await context.bot.edit_message_text(
@@ -335,34 +339,26 @@ async def health_check_route(request):
 
 async def main() -> None:
     """Starts the bot."""
-    # Initialize the database
     await init_db()
 
-    # Crucial check: Ensure BOT_TOKEN is loaded from environment variables
     if not BOT_TOKEN:
         logger.error("BOT_TOKEN environment variable is not set. Bot cannot start.")
-        # Attempt to get the bot token from the old hardcoded location if it was left there by mistake
-        # This is a fallback and not recommended for production
-        if hasattr(os.environ, 'BOT_TOKEN'): # Checks if a hardcoded token is in the env but not explicitly fetched by getenv
+        if hasattr(os.environ, 'BOT_TOKEN'):
              logger.warning("BOT_TOKEN was found in os.environ but not explicitly fetched. Please ensure it's set as a Koyeb environment variable.")
-        return # Exit if bot token is missing
+        return
 
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Manually initialize the application
     await application.initialize()
 
-    # Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
 
-    # Initialize the aiohttp web application for handling both webhook and health check
     app = web.Application()
     app.router.add_get("/", health_check_route)
 
-    # Webhook handler for telegram-bot updates
     async def telegram_webhook_handler(request):
         update_data = await request.json()
         update = Update.de_json(update_data, application.bot)
@@ -371,12 +367,10 @@ async def main() -> None:
 
     app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler)
 
-    # Run the aiohttp server as part of the application setup
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
 
-    # Set webhook with Telegram API
     try:
         await application.bot.delete_webhook()
         logger.info("Webhook با موفقیت حذف شد")
@@ -387,11 +381,9 @@ async def main() -> None:
     await application.bot.set_webhook(url=webhook_full_url)
     logger.info(f"Webhook تنظیم شد: {webhook_full_url}")
 
-    # Start the aiohttp server
     await site.start()
     logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
 
-    # Keep the application running indefinitely
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
