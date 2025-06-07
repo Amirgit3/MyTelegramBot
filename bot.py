@@ -21,10 +21,6 @@ from telegram.ext import (
 )
 from aiohttp import web
 from yt_dlp import YoutubeDL
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Setup logging
 logging.basicConfig(
@@ -32,20 +28,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment variables
+# --- Environment Variables (Fetched from Koyeb or OS) ---
+# These values MUST be set as environment variables on Koyeb for your bot to work.
+# For local testing, you can use a .env file and `load_dotenv()` (as in earlier versions).
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 INSTAGRAM_USERNAME = os.getenv("INSTAGRAM_USERNAME")
 INSTAGRAM_PASSWORD = os.getenv("INSTAGRAM_PASSWORD")
 
-# Use the directly provided Koyeb URL
-WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app"
+WEBHOOK_URL = "https://particular-capybara-amirgit3-bbc0dbbd.koyeb.app" # This is fixed for your Koyeb URL
 WEBHOOK_PATH = "/telegram"
 PORT = int(os.environ.get("PORT", 8080))
 
-# Channel IDs (example - replace with your actual channel IDs)
-# Make sure these are integer values (e.g., -1001234567890)
-REQUIRED_CHANNEL_ID_1 = int(os.getenv("REQUIRED_CHANNEL_ID_1", "-1002198083864"))
-REQUIRED_CHANNEL_ID_2 = int(os.getenv("REQUIRED_CHANNEL_ID_2", "0")) # Use 0 or another indicator if not always required
+# --- Channel Configuration (Directly in code, as they are not sensitive) ---
+# Channel IDs based on the updates you provided.
+# Make sure your bot is an ADMIN in these channels with necessary permissions.
+REQUIRED_CHANNEL_ID_1 = -1001137065230  # "🍀 نگرش مثبت" channel ID
+REQUIRED_CHANNEL_ID_2 = -1002284196638  # "Music 🎶" channel ID
+
+# Channel Invitation Links (Used in messages to users)
+CHANNEL_LINK_1 = "https://t.me/enrgy_m"   # Link for "🍀 نگرش مثبت"
+CHANNEL_LINK_2 = "https://t.me/music_bik" # Link for "Music 🎶"
 
 # --- Database Management ---
 DATABASE_NAME = "user_limits.db"
@@ -96,8 +98,8 @@ async def increment_user_download_count(user_id):
 # --- Helper Functions ---
 async def is_member(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if a user is a member of a specific channel."""
-    if chat_id == 0: # If channel ID is 0, it means it's not required
-        return True
+    if chat_id == 0:
+        return True # This line remains as a safeguard, but with hardcoded IDs, it's less likely to be hit.
     try:
         chat_member = await context.bot.get_chat_member(chat_id, user_id)
         return chat_member.status in ["member", "administrator", "creator"]
@@ -109,7 +111,7 @@ async def check_all_memberships(user_id: int, context: ContextTypes.DEFAULT_TYPE
     """Checks if a user is a member of all required channels."""
     is_member_1 = await is_member(user_id, REQUIRED_CHANNEL_ID_1, context)
     is_member_2 = True
-    if REQUIRED_CHANNEL_ID_2 != 0: # Only check if a second channel is defined (not 0)
+    if REQUIRED_CHANNEL_ID_2 != 0: # Only check if a second channel is explicitly set and not 0
         is_member_2 = await is_member(user_id, REQUIRED_CHANNEL_ID_2, context)
     return is_member_1 and is_member_2
 
@@ -137,12 +139,17 @@ async def check_membership_and_proceed(update: Update, context: ContextTypes.DEF
         )
     else:
         channel_links_text = (
-            f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
+            f"- کانال اول: {CHANNEL_LINK_1}\n"
         )
-        if REQUIRED_CHANNEL_ID_2 != 0:
+        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
             channel_links_text += (
-                f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
+                f"- کانال دوم: {CHANNEL_LINK_2}"
             )
+        elif REQUIRED_CHANNEL_ID_2 != 0:
+             channel_links_text += (
+                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
+            )
+
 
         message_text = (
             "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
@@ -171,12 +178,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     else:
         channel_links_text = (
-            f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
+            f"- کانال اول: {CHANNEL_LINK_1}\n"
         )
-        if REQUIRED_CHANNEL_ID_2 != 0:
+        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
             channel_links_text += (
-                f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
+                f"- کانال دوم: {CHANNEL_LINK_2}"
             )
+        elif REQUIRED_CHANNEL_ID_2 != 0:
+            channel_links_text += (
+                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
+            )
+
 
         await update.message.reply_html(
             rf"سلام {user.mention_html()}! ⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
@@ -194,12 +206,17 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     is_all_member = await check_all_memberships(user_id, context)
     if not is_all_member:
         channel_links_text = (
-            f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
+            f"- کانال اول: {CHANNEL_LINK_1}\n"
         )
-        if REQUIRED_CHANNEL_ID_2 != 0:
+        if REQUIRED_CHANNEL_ID_2 != 0 and CHANNEL_LINK_2:
             channel_links_text += (
-                f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
+                f"- کانال دوم: {CHANNEL_LINK_2}"
             )
+        elif REQUIRED_CHANNEL_ID_2 != 0:
+            channel_links_text += (
+                f"- کانال دوم: (لینک کانال دوم در کد تنظیم نشده است)"
+            )
+
         await update.message.reply_text(
             "⚠️ برای استفاده از ربات، ابتدا باید در کانال‌های زیر عضو شوید:\n\n"
             f"{channel_links_text}\n\n"
@@ -240,6 +257,10 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ydl_opts['username'] = INSTAGRAM_USERNAME
             ydl_opts['password'] = INSTAGRAM_PASSWORD
             logger.info("Instagram credentials added to yt-dlp options.")
+        else:
+            if "instagram.com" in user_message:
+                logger.warning("Instagram credentials not set as environment variables. Instagram downloads may fail.")
+
 
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(user_message, download=True)
@@ -314,10 +335,15 @@ async def main() -> None:
     # Initialize the database
     await init_db()
 
+    # Crucial check: Ensure BOT_TOKEN is loaded from environment variables
+    if not BOT_TOKEN:
+        logger.error("BOT_TOKEN environment variable is not set. Bot cannot start.")
+        return # Exit if bot token is missing
+
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
-    # Manually initialize the application as run_webhook/run_polling aren't used for the main loop
+    # Manually initialize the application
     await application.initialize()
 
     # Handlers
@@ -333,7 +359,6 @@ async def main() -> None:
     async def telegram_webhook_handler(request):
         update_data = await request.json()
         update = Update.de_json(update_data, application.bot)
-        # Process the update with the initialized application
         await application.process_update(update)
         return web.Response()
 
@@ -345,7 +370,6 @@ async def main() -> None:
     site = web.TCPSite(runner, '0.0.0.0', PORT)
 
     # Set webhook with Telegram API
-    # It's good practice to delete webhook before setting it again
     try:
         await application.bot.delete_webhook()
         logger.info("Webhook با موفقیت حذف شد")
@@ -361,7 +385,6 @@ async def main() -> None:
     logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
 
     # Keep the application running indefinitely
-    # This prevents the main task from exiting, keeping the aiohttp server alive
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
@@ -369,3 +392,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as e:
         logger.error(f"خطای کلی در اجرای ربات: {e}", exc_info=True)
+
