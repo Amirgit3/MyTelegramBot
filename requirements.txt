@@ -1,4 +1,5 @@
-python-telegram-bot==20.6
-yt-dlp
-python-dotenv
-aiohttp
+python-telegram-bot==20.7
+yt-dlp==2024.04.09
+aiohttp==3.9.5
+aiosqlite==0.20.0
+python-dotenv==1.0.1
