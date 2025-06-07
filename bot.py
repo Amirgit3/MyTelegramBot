@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 import aiosqlite
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from telegram import (
     Update,
@@ -19,7 +19,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from aiohttp import web # aiohttp را برای Health Check برمی‌گردانیم
+from aiohttp import web
 from yt_dlp import YoutubeDL
 from dotenv import load_dotenv
 
@@ -43,8 +43,9 @@ WEBHOOK_PATH = "/telegram"
 PORT = int(os.environ.get("PORT", 8080))
 
 # Channel IDs (example - replace with your actual channel IDs)
-REQUIRED_CHANNEL_ID_1 = -1002198083864  # Replace with your first channel ID
-REQUIRED_CHANNEL_ID_2 = -1002167086815  # Replace with your second channel ID (if any)
+# Make sure these are integer values (e.g., -1001234567890)
+REQUIRED_CHANNEL_ID_1 = int(os.getenv("REQUIRED_CHANNEL_ID_1", "-1002198083864"))
+REQUIRED_CHANNEL_ID_2 = int(os.getenv("REQUIRED_CHANNEL_ID_2", "0")) # Use 0 or another indicator if not always required
 
 # --- Database Management ---
 DATABASE_NAME = "user_limits.db"
@@ -62,7 +63,7 @@ async def init_db():
             """
         )
         await db.commit()
-    logger.info("Database initialized successfully.") # Add log for clarity
+    logger.info("Database initialized successfully.")
 
 async def get_user_download_count(user_id):
     async with aiosqlite.connect(DATABASE_NAME) as db:
@@ -74,7 +75,6 @@ async def get_user_download_count(user_id):
         if result:
             count, last_reset_date = result
             if last_reset_date != today_str:
-                # Reset count for a new day
                 await db.execute("UPDATE user_downloads SET download_count = 0, last_reset_date = ? WHERE user_id = ?", (today_str, user_id))
                 await db.commit()
                 return 0
@@ -96,6 +96,8 @@ async def increment_user_download_count(user_id):
 # --- Helper Functions ---
 async def is_member(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if a user is a member of a specific channel."""
+    if chat_id == 0: # If channel ID is 0, it means it's not required
+        return True
     try:
         chat_member = await context.bot.get_chat_member(chat_id, user_id)
         return chat_member.status in ["member", "administrator", "creator"]
@@ -106,8 +108,8 @@ async def is_member(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TY
 async def check_all_memberships(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Checks if a user is a member of all required channels."""
     is_member_1 = await is_member(user_id, REQUIRED_CHANNEL_ID_1, context)
-    is_member_2 = True # Default to True if no second channel is required
-    if REQUIRED_CHANNEL_ID_2: # Only check if a second channel is defined
+    is_member_2 = True
+    if REQUIRED_CHANNEL_ID_2 != 0: # Only check if a second channel is defined (not 0)
         is_member_2 = await is_member(user_id, REQUIRED_CHANNEL_ID_2, context)
     return is_member_1 and is_member_2
 
@@ -128,17 +130,16 @@ async def check_membership_and_proceed(update: Update, context: ContextTypes.DEF
     is_all_member = await check_all_memberships(user_id, context)
     if is_all_member:
         message_text = "✅ عضویت شما در کانال‌ها تایید شد! حالا می‌توانید لینک یوتیوب، شورت، ریلز یا IGTV را ارسال کنید."
-        # Remove the "check membership" button after successful check
         await context.bot.edit_message_reply_markup(
             chat_id=update.effective_chat.id,
             message_id=update.effective_message.message_id,
-            reply_markup=None # Remove keyboard
+            reply_markup=None
         )
     else:
         channel_links_text = (
             f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
         )
-        if REQUIRED_CHANNEL_ID_2:
+        if REQUIRED_CHANNEL_ID_2 != 0:
             channel_links_text += (
                 f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
             )
@@ -163,7 +164,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if is_all_member:
         await update.message.reply_html(
             rf"سلام {user.mention_html()}! خوش آمدید. 👋",
-            reply_markup=None # No need for membership button
+            reply_markup=None
         )
         await update.message.reply_text(
             "لطفاً لینک یوتیوب، شورت، ریلز یا IGTV اینستاگرام را برای دانلود ارسال کنید."
@@ -172,7 +173,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         channel_links_text = (
             f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
         )
-        if REQUIRED_CHANNEL_ID_2:
+        if REQUIRED_CHANNEL_ID_2 != 0:
             channel_links_text += (
                 f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
             )
@@ -195,7 +196,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         channel_links_text = (
             f"- کانال اول: {os.getenv('CHANNEL_LINK_1', 'لینک کانال اول را در .env تنظیم کنید')}\n"
         )
-        if REQUIRED_CHANNEL_ID_2:
+        if REQUIRED_CHANNEL_ID_2 != 0:
             channel_links_text += (
                 f"- کانال دوم: {os.getenv('CHANNEL_LINK_2', 'لینک کانال دوم را در .env تنظیم کنید')}"
             )
@@ -231,7 +232,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             'ignoreerrors': True,
             'max_downloads': 1,
             'usenetrc': False,
-            'cookiefile': None, # Ensure no cookie file is used by default
+            'cookiefile': None,
         }
 
         # Add Instagram credentials if available
@@ -248,7 +249,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
             logger.info(f"فایل دانلود شد: {file_path}, حجم: {file_size_mb:.2f} MB")
 
-            if file_size_mb > 50: # Telegram bot API limit is 50MB for general files
+            if file_size_mb > 50:
                 await context.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=sent_message.message_id,
@@ -256,7 +257,6 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
             else:
                 try:
-                    # Determine if it's a video or photo
                     if info.get('ext') in ['mp4', 'mov', 'avi', 'mkv', 'webm']:
                         with open(file_path, 'rb') as video_file:
                             await context.bot.send_video(chat_id, video_file, caption="فایل ویدیویی شما:")
@@ -268,7 +268,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                             await context.bot.send_document(chat_id, doc_file, caption="فایل شما:")
 
                     await context.bot.delete_message(chat_id=chat_id, message_id=sent_message.message_id)
-                    await increment_user_download_count(user_id) # Increment count only on successful send
+                    await increment_user_download_count(user_id)
                 except Exception as e:
                     logger.error(f"Error sending file to Telegram: {e}")
                     await context.bot.edit_message_text(
@@ -290,7 +290,6 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             text=f"متاسفانه، در پردازش لینک شما مشکلی پیش آمد: {e}\nلطفاً از لینک صحیح و عمومی استفاده کنید و دوباره امتحان کنید."
         )
     finally:
-        # Clean up temporary directory
         if os.path.exists(temp_dir_path):
             for file_name in os.listdir(temp_dir_path):
                 file_path_to_delete = os.path.join(temp_dir_path, file_name)
@@ -305,7 +304,7 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
 
-# تابع Health Check جداگانه برای aiohttp
+# Health Check function for aiohttp
 async def health_check_route(request):
     """Simple endpoint for Koyeb Health Check."""
     return web.Response(text="OK")
@@ -318,6 +317,9 @@ async def main() -> None:
     global application
     application = Application.builder().token(BOT_TOKEN).build()
 
+    # Manually initialize the application as run_webhook/run_polling aren't used for the main loop
+    await application.initialize()
+
     # Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(check_membership_and_proceed, pattern="^check_membership$"))
@@ -325,15 +327,17 @@ async def main() -> None:
 
     # Initialize the aiohttp web application for handling both webhook and health check
     app = web.Application()
-    app.router.add_get("/", health_check_route) # Health check route
+    app.router.add_get("/", health_check_route)
 
-    # We need to pass the webhook handler for telegram-bot updates
+    # Webhook handler for telegram-bot updates
     async def telegram_webhook_handler(request):
-        update = Update.de_json(await request.json(), application.bot)
+        update_data = await request.json()
+        update = Update.de_json(update_data, application.bot)
+        # Process the update with the initialized application
         await application.process_update(update)
         return web.Response()
 
-    app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler) # Telegram webhook route
+    app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler)
 
     # Run the aiohttp server as part of the application setup
     runner = web.AppRunner(app)
@@ -341,8 +345,13 @@ async def main() -> None:
     site = web.TCPSite(runner, '0.0.0.0', PORT)
 
     # Set webhook with Telegram API
-    await application.bot.delete_webhook()
-    logger.info("Webhook با موفقیت حذف شد")
+    # It's good practice to delete webhook before setting it again
+    try:
+        await application.bot.delete_webhook()
+        logger.info("Webhook با موفقیت حذف شد")
+    except Exception as e:
+        logger.warning(f"Failed to delete webhook (might not be set): {e}")
+
     webhook_full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
     await application.bot.set_webhook(url=webhook_full_url)
     logger.info(f"Webhook تنظیم شد: {webhook_full_url}")
@@ -352,6 +361,7 @@ async def main() -> None:
     logger.info(f"سرور aiohttp برای Webhook در پورت {PORT} آغاز به کار کرد.")
 
     # Keep the application running indefinitely
+    # This prevents the main task from exiting, keeping the aiohttp server alive
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
@@ -359,4 +369,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as e:
         logger.error(f"خطای کلی در اجرای ربات: {e}", exc_info=True)
-
