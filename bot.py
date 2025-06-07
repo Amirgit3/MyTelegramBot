@@ -20,7 +20,7 @@ from telegram.ext import (
     filters,
 )
 from aiohttp import web
-from yt_dlp import YoutubeDL, DownloadError, ExtractorError # Import specific yt-dlp exceptions
+from yt_dlp import YoutubeDL, DownloadError # Removed ExtractorError from here
 
 # Setup logging
 logging.basicConfig(
@@ -231,15 +231,11 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         file_path = ydl.prepare_filename(info)
                     else:
                         # If info is None even with credentials, something is wrong
-                        raise ExtractorError("Failed to extract info with credentials.")
-            except ExtractorError as ee:
-                logger.warning(f"تلاش با اعتبارنامه اینستاگرام شکست خورد: {ee}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
-                # If login fails, info will be None, so we move to the public attempt
+                        raise DownloadError("Failed to extract info with credentials.") # Changed ExtractorError to DownloadError or generic Exception
+            except DownloadError as de: # Catch DownloadError
+                logger.warning(f"تلاش با اعتبارنامه اینستاگرام شکست خورد: {de}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
                 info = None # Reset info to None so the second attempt is triggered
-            except DownloadError as de:
-                logger.warning(f"خطا در دانلود با اعتبارنامه اینستاگرام: {de}. (ممکن است به دلیل نیاز به تایید لاگین باشد)")
-                info = None
-            except Exception as e:
+            except Exception as e: # Catch any other generic exceptions
                 logger.warning(f"خطای نامشخص در تلاش با اعتبارنامه اینستاگرام: {e}. (تلاش عمومی انجام می‌شود)")
                 info = None
 
