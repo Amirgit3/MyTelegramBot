@@ -3,14 +3,14 @@ FROM python:3.9-slim-buster
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y ffmpeg \
-    --no-install-recommends # Add --no-install-recommends to keep image size smaller
+    --no-install-recommends
 
 # Install Python dependencies from requirements.txt
-COPY requirements.txt . # <-- این خط باید اینجا باشد و جداگانه
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Make sure yt-dlp is installed and up-to-date
-RUN pip install --no-cache-dir yt-dlp --upgrade # Using --upgrade to ensure latest version
+RUN pip install --no-cache-dir yt-dlp --upgrade
 
 # Set working directory
 WORKDIR /app
