@@ -15,8 +15,13 @@ RUN pip install --no-cache-dir yt-dlp --upgrade
 # Set working directory
 WORKDIR /app
 
-# Copy your bot code
+# Copy your bot code and other project files
 COPY . .
+
+# --- NEW/UPDATED: Copy cookies files with their correct names ---
+COPY www.instagram.com_cookies.txt .
+COPY www.youtube.com_cookies.txt .
+# --- END NEW/UPDATED ---
 
 # Command to run your application
 CMD ["python", "bot.py"]
