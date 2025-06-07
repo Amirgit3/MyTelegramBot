@@ -305,6 +305,9 @@ async def handle_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 logger.error(f"Error deleting temporary directory {temp_dir_path}: {e}")
 
+async def health_check(request):
+    """Simple endpoint for Koyeb Health Check."""
+    return web.Response(text="OK")
 
 async def telegram_webhook_handler(request):
     """Handle incoming Telegram updates from the webhook."""
@@ -337,6 +340,7 @@ async def main() -> None:
 
         # Start aiohttp server for webhook
         app = web.Application()
+        app.router.add_get("/", health_check) # <--- این خط جدید برای Health Check
         app.router.add_post(WEBHOOK_PATH, telegram_webhook_handler)
         runner = web.AppRunner(app)
         await runner.setup()
